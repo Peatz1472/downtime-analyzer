@@ -2250,8 +2250,68 @@ function sharedState(){
   if(lockOn()) return lockState;
   return (typeof BASE_STATE !== 'undefined' && BASE_STATE) ? BASE_STATE : null;
 }
-const seenStamp = () => { try { return localStorage.getItem(STATE_SEEN_KEY) || ''; } catch(e){ return ''; } };
-const markSeen = s => { try { localStorage.setItem(STATE_SEEN_KEY, s || ''); } catch(e){} };
+/* What this browser last took from a published build: the stamp, plus a
+   signature of exactly what was copied in. The signature is what lets a later
+   publish tell "they never touched it" apart from "they have their own work" —
+   without it, a browser that merely *read* an older publish looks identical to
+   one someone has been typing into, and gets left on stale numbers forever. */
+function seenRec(){
+  try {
+    const raw = localStorage.getItem(STATE_SEEN_KEY) || '';
+    if(!raw) return {stamp: '', sig: ''};
+    if(raw.charAt(0) === '{') return JSON.parse(raw);
+    return {stamp: raw, sig: ''};          // written by an older build
+  } catch(e){ return {stamp: '', sig: ''}; }
+}
+const seenStamp = () => seenRec().stamp;
+const markSeen = (s, sig) => {
+  try { localStorage.setItem(STATE_SEEN_KEY,
+    JSON.stringify({stamp: s || '', sig: sig == null ? stateSig() : sig})); } catch(e){}
+};
+
+/** A stable fingerprint of the authored state. Keys are sorted so a round trip
+    through storage cannot change it, and `open` is dropped because expanding a
+    card is not a change to the plan. */
+function stateSig(){
+  const norm = v => {
+    if(Array.isArray(v)) return v.map(norm);
+    if(v && typeof v === 'object'){
+      const o = {};
+      for(const k of Object.keys(v).sort()){ if(k !== 'open') o[k] = norm(v[k]); }
+      return o;
+    }
+    return v;
+  };
+  const s = JSON.stringify(norm({a: S.actions, e: S.edits, x: S.excluded, r: S.rc, s: S.sla}));
+  let h = 5381;
+  for(let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return h.toString(36) + '.' + s.length;
+}
+
+/** Set when the file carries a newer shared version that this browser has NOT
+    taken, because there is local work that would be overwritten. */
+let sharedStale = false;
+
+const sameVal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+/** Is everything in this browser already present, unchanged, in the incoming
+    shared version? If so, adopting it cannot lose anything — it only adds — so
+    there is nothing to ask about. This is what rescues a browser that simply
+    read an older publish: its copy is a strict subset of the newer one. */
+function localIsContainedIn(sh){
+  const sub = (mine, theirs) => {
+    theirs = theirs || {};
+    return Object.keys(mine || {}).every(k => k in theirs && sameVal(mine[k], theirs[k]));
+  };
+  if(!sub(S.edits, sh.edits)) return false;
+  if(!sub(S.excluded, sh.excluded)) return false;
+  if(!sub(S.rc, sh.rc)) return false;
+  const strip = a => { const o = Object.assign({}, a); delete o.open; return o; };
+  const theirActions = (sh.actions || []).map(a => JSON.stringify(strip(normAction(a))));
+  if(!(S.actions || []).every(a => theirActions.includes(JSON.stringify(strip(a))))) return false;
+  // an SLA rule the user never moved off the default is not "their work"
+  return sameVal(S.sla, Object.assign({}, SLA_DEF, sh.sla || {})) || sameVal(S.sla, SLA_DEF);
+}
 
 /** Has this browser authored anything of its own? Adopting the shared copy over
     someone's unsaved thinking would be the one unforgivable move here. */
@@ -2269,7 +2329,8 @@ function adoptSharedState(sh){
   if(sh.rc) S.rc = Object.assign({}, sh.rc);
   if(sh.sla) S.sla = Object.assign({}, SLA_DEF, sh.sla);
   saveActions(); saveEdits(); saveRC(); saveSLA();
-  markSeen(sh.stamp || '');
+  markSeen(sh.stamp || '');   // signature computed from what was just adopted
+  sharedStale = false;
   return true;
 }
 
@@ -2279,26 +2340,44 @@ function adoptSharedState(sh){
 function initSharedState(){
   const sh = sharedState();
   if(!sh) return;
+  const rec = seenRec();
+  if(rec.stamp && rec.stamp === (sh.stamp || '')) return;   // already on this one
   if(!hasOwnWork()){ adoptSharedState(sh); return; }
-  if(seenStamp() === (sh.stamp || '')) return;   // already decided about this one
+  /* There is local state — but if it is byte-for-byte what this browser copied
+     from an earlier publish, then nobody has typed anything and there is
+     nothing to protect. Take the newer version silently: leaving someone on
+     stale numbers to guard a copy of our own older numbers helps no one. */
+  if(rec.sig && rec.sig === stateSig()){ adoptSharedState(sh); return; }
+  /* Older builds stored only a stamp, so there is no signature to compare —
+     and a browser upgraded from one of those would otherwise be stuck asking
+     forever. Containment answers it without a signature: if nothing here would
+     be lost, take the newer version. */
+  if(localIsContainedIn(sh)){ adoptSharedState(sh); return; }
+  sharedStale = true;
 }
 
 /** Shown on the Action Plan when the file carries a newer shared plan than the
     one this browser is working from. */
+/* Rendered on EVERY page, not just the Action Plan. A browser showing stale
+   numbers must say so wherever the reader happens to be looking — a notice
+   buried on one page is the same as no notice at all, and it let a whole
+   afternoon of corrections sit unseen behind numbers that looked fine. */
 function sharedPlanNote(){
   const sh = sharedState();
-  if(!sh || !sh.stamp || seenStamp() === sh.stamp) return '';
+  if(!sharedStale || !sh || !sh.stamp) return '';
   const n = Array.isArray(sh.actions) ? sh.actions.length : 0;
+  const ne = sh.edits ? Object.keys(sh.edits).length : 0;
   return `
-  <div class="banner info" style="margin:12px 14px 0"><span class="i">📥</span>
+  <div class="banner warn" style="margin:0 0 12px"><span class="i">📥</span>
     <div style="flex:1">
-      <b>มีแผนงานกลางจากไฟล์ที่เผยแพร่ (${n0(n)} งาน · ${esc(fmtWhen(Date.parse(sh.stamp)))})</b>
+      <b>ข้อมูลที่คุณเห็นอยู่เป็นของเก่า — มีชุดใหม่กว่าบนเว็บแล้ว</b>
       <p style="margin-top:3px;color:var(--muted);font-size:var(--t-xs);line-height:var(--lh-body)">
-        ตอนนี้คุณกำลังดู<b>แผนของคุณเองในเครื่องนี้</b> ซึ่งคนอื่นไม่เห็น ·
-        กดโหลดแผนกลางถ้าต้องการใช้ตัวที่ทีมใช้ร่วมกัน — <b>ของที่คุณกรอกไว้จะถูกแทนที่</b></p>
+        ชุดที่เผยแพร่ไว้: <b>${n0(ne)}</b> การแก้ไข · <b>${n0(n)}</b> งาน ·
+        ${esc(fmtWhen(Date.parse(sh.stamp)))}<br>
+        ตัวเลขทุกหน้าตอนนี้มาจาก<b>ของเก่าในเครื่องนี้</b> เพราะคุณเคยแก้ไว้เอง จึงไม่ทับให้</p>
       <div style="display:flex;gap:7px;margin-top:8px;flex-wrap:wrap">
-        <button class="btn sm" id="stateAdopt">📥 โหลดแผนกลาง</button>
-        <button class="btn sm ghost" id="stateKeep">ใช้ของผมต่อ ไม่ต้องถามอีก</button>
+        <button class="btn sm primary" id="stateAdopt">📥 ใช้ชุดใหม่จากเว็บ</button>
+        <button class="btn sm ghost" id="stateKeep">ใช้ของเครื่องนี้ต่อ</button>
       </div>
     </div>
   </div>`;
@@ -4640,7 +4719,6 @@ P.action = c => {
         <button class="btn sm" id="actAdd">+ เพิ่มงาน</button>
         ${acts.length ? '<button class="btn sm ghost" id="actClear">ล้างทั้งหมด</button>' : ''}
       </div></div>
-    ${sharedPlanNote()}
     ${acts.length ? `<div class="bd" style="display:flex;flex-direction:column;gap:10px">
       ${(() => {
         /* Grouped by brand, because a QW job and a WAG job are worked by
@@ -6559,7 +6637,7 @@ function render(){
   const view = $('view');
   const fn = P[S.page] || P.overview;
   const keepY = S.quiet ? view.scrollTop : 0;
-  view.innerHTML = `<div class="page">${fn(C)}</div>`;
+  view.innerHTML = `<div class="page">${sharedPlanNote()}${fn(C)}</div>`;
   view.scrollTop = keepY;
   mountCharts(view, C);
   // A quiet render is a data-editor keystroke, not a page change: replaying the
@@ -6952,7 +7030,10 @@ function bindGlobalEvents(){
     }
     if(t.id === 'stateKeep'){
       const sh = sharedState();
-      markSeen(sh ? sh.stamp : '');
+      // record the decision against what is in the browser right now, so a
+      // later publish asks again instead of staying silent forever
+      markSeen(sh ? sh.stamp : '', stateSig());
+      sharedStale = false;
       render();
       return;
     }
