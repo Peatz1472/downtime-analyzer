@@ -4428,6 +4428,23 @@ const ACT_STAGE = [
 ];
 const stageMeta = k => ACT_STAGE.find(s => s[0] === k) || ACT_STAGE[0];
 
+/* QW and WAG are two fleets, not two labels: QW opens 12 hours with wash staff
+   who can clear small faults themselves, WAG opens 24 hours with nobody on
+   site. The same broken part is a different job in each, so a plan that mixes
+   them is really two plans wearing one row. */
+const BRAND_TONE = {QW: 's3', WAG: 's2'};
+function brandChip(a, ac){
+  const pinned = a.scope && a.scope.brand;
+  if(pinned) return `<span class="chip" style="background:var(--${BRAND_TONE[pinned] || 'info'});
+    color:#fff;border:0" title="งานนี้ทำเฉพาะ ${esc(pinned)}">${esc(pinned)}</span>`;
+  if(!ac || ac.empty || !ac.brands) return '';
+  if(ac.brands.length === 1)
+    return `<span class="chip" style="background:var(--${BRAND_TONE[ac.brands[0]] || 'info'});
+      color:#fff;border:0">${esc(ac.brands[0])}</span>`;
+  return `<span class="chip warn" title="เคสนี้กินทั้งสองแบรนด์ ซึ่งเงื่อนไขหน้างานต่างกัน — แยกเป็นสองงานจะตรงกว่า"
+    >⚠ ${ac.brands.map(esc).join(' + ')}</span>`;
+}
+
 const ACT_FIELDS_NUM = ['expected', 'actual', 'before', 'after', 'cutPct', 'cost'];
 /* Fields kept as a list of points. Their line breaks are the content, so the
    save path must not collapse whitespace the way it does for a one-line field. */
@@ -4485,9 +4502,14 @@ function trendWindow(recs, c){
 function actionCase(a, c){
   const sc = a.scope;
   if(!sc) return null;
+  /* A job can be pinned to one brand. QW and WAG are two fleets — 12 hours with
+     wash staff on site against 24 hours with nobody — so the same equipment
+     fault is a different job with a different fix in each. Left unset, the job
+     covers both, which is right for something genuinely fleet-wide. */
   const inScope = r =>
     (sc.kind === 'branch' ? r.branchCode === sc.key : r.category === sc.key) &&
-    (!sc.branch || r.branchCode === sc.branch);
+    (!sc.branch || r.branchCode === sc.branch) &&
+    (!sc.brand || r.brand === sc.brand);
   const recs = c.recs.filter(inScope);
   if(!recs.length) return {recs: [], empty: true};
   const withH = recs.filter(r => r.hours != null);
@@ -4507,6 +4529,13 @@ function actionCase(a, c){
     worst: withH.length ? Math.max(...withH.map(r => r.hours)) : 0,
     stopped: recs.filter(r => r.stopped === true).length,
     branches: uniq(recs.map(r => r.branchCode)).length,
+    brands: uniq(recs.map(r => r.brand)).filter(b => b && b !== 'OTHER').sort(),
+    // what each brand carries, so splitting one job into two shows the stakes
+    byBrand: uniq(recs.map(r => r.brand)).filter(b => b && b !== 'OTHER').sort().map(b => {
+      const rs = recs.filter(r => r.brand === b), wh2 = rs.filter(r => r.hours != null);
+      return {brand: b, count: rs.length, hours: sum(wh2, r => r.hours),
+        branches: uniq(rs.map(r => r.branchCode)).length};
+    }),
     last: months[months.length - 1] || '',
     share: c.o.hours > 0 ? hours / c.o.hours * 100 : 0,
   };
@@ -4603,7 +4632,37 @@ P.action = c => {
       </div></div>
     ${sharedPlanNote()}
     ${acts.length ? `<div class="bd" style="display:flex;flex-direction:column;gap:10px">
-      ${acts.map((a, i) => actionCard(a, i, cases[i], exp[i], act[i], c, num, txt, bullets)).join('')}
+      ${(() => {
+        /* Grouped by brand, because a QW job and a WAG job are worked by
+           different people under different conditions and are only confusing
+           side by side. Jobs that genuinely span both keep their own block. */
+        const groupOf = (a, ac) => (a.scope && a.scope.brand) ||
+          (ac && !ac.empty && ac.brands && ac.brands.length === 1 ? ac.brands[0] : 'ทั้งสองแบรนด์');
+        const order = ['QW', 'WAG', 'ทั้งสองแบรนด์'];
+        const groups = new Map();
+        acts.forEach((a, i) => {
+          const g = groupOf(a, cases[i]);
+          if(!groups.has(g)) groups.set(g, []);
+          groups.get(g).push(i);
+        });
+        const keys = [...groups.keys()].sort((x, y) =>
+          (order.indexOf(x) + 1 || 9) - (order.indexOf(y) + 1 || 9));
+        const card = i => actionCard(acts[i], i, cases[i], exp[i], act[i], c, num, txt, bullets);
+        // one brand only: no point in a header that says the same thing twice
+        if(keys.length < 2) return acts.map((a, i) => card(i)).join('');
+        return keys.map(k => {
+          const idx = groups.get(k);
+          const h = sum(idx.map(i => cases[i] && !cases[i].empty ? cases[i].hours : 0));
+          const tone = BRAND_TONE[k];
+          return `<div style="display:flex;align-items:center;gap:9px;margin-top:4px">
+            <span class="chip" style="${tone ? `background:var(--${tone});color:#fff;border:0` : ''}"
+              >${esc(k)}</span>
+            <span style="font-size:var(--t-xs);color:var(--muted)">${n0(idx.length)} งาน ·
+              ครอบคลุม ${n1(h)} ชม.</span>
+            <span style="flex:1;height:1px;background:var(--line)"></span>
+          </div>` + idx.map(i => card(i)).join('');
+        }).join('');
+      })()}
     </div>` : `<div class="empty"><b>ยังไม่มีงานในแผน</b>
       กด <b>START ACTION</b> จากหน้า Priority Matrix / Root Cause / แผงเจาะลึก
       แล้วงานจะถูกสร้างพร้อมเคสจริงมาให้เลย — หรือกด <b>+ เพิ่มงาน</b> เพื่อกรอกเอง</div>`}
@@ -4664,6 +4723,7 @@ function actionCard(a, i, ac, expected, actual, c, num, txt, bullets){
         <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
           <b style="font-size:14px">${esc(clip(a.title, 56))}</b>
           <span class="chip ${sg[3]}" title="${esc(sg[2])}">${esc(sg[0])}</span>
+          ${brandChip(a, ac)}
           ${a.scope ? `<span class="chip info">${a.scope.kind === 'branch' ? '📍' : '🔧'} ${esc(clip(a.scope.key, 26))}</span>`
             : '<span class="chip warn" title="งานนี้ยังไม่ได้ผูกกับเคสในข้อมูล">ไม่ได้ผูกกับข้อมูล</span>'}
           ${hasCase ? `<span style="font-size:12px;color:var(--muted)">${n0(ac.count)} ใบงาน ·
@@ -4774,6 +4834,22 @@ function actionCard(a, i, ac, expected, actual, c, num, txt, bullets){
               ${ACT_STAGE.map(s => `<option value="${s[0]}"${s[0] === a.stage ? ' selected' : ''}>${s[1]}</option>`).join('')}
             </select>
             <p style="font-size:12px;color:var(--muted);margin-top:4px">${esc(sg[2])}</p>
+            ${a.scope ? `
+            <p style="font-size:12px;color:var(--muted);margin:9px 0 4px">ทำกับแบรนด์ไหน</p>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+              <div class="seg">
+                ${['', 'QW', 'WAG'].map(b => `<button data-actbrand="${i}" data-b="${b}"
+                  ${(a.scope.brand || '') === b ? 'class="on"' : ''}>${b || 'ทั้งสองแบรนด์'}</button>`).join('')}
+              </div>
+              ${hasCase && ac.byBrand && ac.byBrand.length > 1 && !a.scope.brand
+                ? `<button class="btn sm" data-actsplit="${i}"
+                    title="สร้างเป็นสองงาน งานละแบรนด์ พร้อมคัดลอกสาเหตุและวิธีแก้ไปให้">✂ แยกเป็น 2 งาน</button>` : ''}
+            </div>
+            ${hasCase && ac.byBrand && ac.byBrand.length > 1 ? `
+            <p style="font-size:var(--t-2xs);color:var(--muted);margin-top:6px;line-height:var(--lh-body)">
+              เคสนี้กินทั้งสองแบรนด์ — ${ac.byBrand.map(x =>
+                `<b>${esc(x.brand)}</b> ${n0(x.count)} ใบ ${n1(x.hours)} ชม. ${n0(x.branches)} สาขา`).join(' · ')}<br>
+              QW เปิด 12 ชม. มีพนักงานหน้าร้าน · WAG เปิด 24 ชม. ไม่มีคน — วิธีแก้มักไม่เหมือนกัน</p>` : ''}` : ''}
             <p style="font-size:12px;color:var(--muted);margin:9px 0 4px">อะไหล่ / ของที่ต้องใช้</p>
             ${bullets(i, 'parts', a.parts, 'ขึ้นบรรทัดใหม่ = 1 รายการ · เช่น ขั้วกันน้ำ IP67 ×20')}
             <div style="display:flex;gap:12px;margin-top:9px">
@@ -6797,6 +6873,37 @@ function bindGlobalEvents(){
       saveActions(); renderEditor(); return;
     }
     if(t.id === 'deployBtn'){ deployDialog(); return; }
+    const ab = t.closest('[data-actbrand]');
+    if(ab){
+      const a = S.actions[Number(ab.dataset.actbrand)];
+      if(!a || !a.scope) return;
+      a.scope = Object.assign({}, a.scope, {brand: ab.dataset.b || ''});
+      saveActions(); render();
+      return;
+    }
+    const asp = t.closest('[data-actsplit]');
+    if(asp){
+      /* One job covering both fleets becomes two, each keeping the thinking
+         already written down — the cause and the countermeasure are usually
+         most of the work, and they are a starting point for both. */
+      const i = Number(asp.dataset.actsplit), a = S.actions[i];
+      if(!a || !a.scope) return;
+      const c = ctx();
+      const ac = actionCase(a, c);
+      const brands = (ac && ac.brands) || [];
+      if(brands.length < 2) return;
+      if(!confirm('แยก “' + a.title + '” เป็น ' + brands.length + ' งาน (' + brands.join(' และ ') + ')?\n\n' +
+        'สาเหตุ วิธีแก้ และรายละเอียดที่กรอกไว้จะถูกคัดลอกไปให้ทั้งสองงาน แล้วแก้แยกกันได้')) return;
+      const made = brands.map(b => normAction(Object.assign({}, JSON.parse(JSON.stringify(a)), {
+        title: a.title + ' — ' + b,
+        scope: Object.assign({}, a.scope, {brand: b}),
+        open: false,
+      })));
+      S.actions.splice(i, 1, ...made);
+      saveActions(); render();
+      toast('✂ แยกเป็น ' + made.length + ' งานแล้ว — แก้รายละเอียดของแต่ละแบรนด์แยกกันได้เลย');
+      return;
+    }
     if(t.id === 'actSave'){
       /* Autosave happens when a field loses focus, which leaves one real gap:
          text still being typed in a focused field has not been read yet. So
