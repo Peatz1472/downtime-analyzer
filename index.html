@@ -521,7 +521,17 @@ html.printfit .reveal,html.printfit .grow,html.printfit .draw{animation:none!imp
   #printroot{position:static!important;left:auto!important;width:auto!important;overflow:visible!important}
   .card{box-shadow:none!important;break-inside:avoid}
   table.tbl tr{break-inside:avoid}
+  /* Marked by the fitter: taller than a sheet, so it HAS to be allowed to
+     break — refusing makes the browser clip the remainder instead. */
+  .card.brk,section.brk{break-inside:auto!important}
+  /* but the blocks inside it still stay whole, so the split falls between
+     sections rather than through a chart or a row of numbers */
+  .card.brk .grid,.card.brk .kpi,.card.brk .banner,.card.brk table.tbl,
+  .card.brk .card,.card.brk svg{break-inside:avoid}
 }
+/* A page long enough to need several sheets must not be boxed to one height. */
+html.printfit .page.tall,#printroot .printpage.tall{
+  overflow:visible!important;height:auto!important}
 
 /* mobile rail */
 #railBtn{display:none}
@@ -7299,7 +7309,24 @@ function fitPageBox(page, inner){
     scale = 1;
   }
   inner.style.transform = scale < 1 ? 'scale(' + scale + ')' : 'none';
-  page.style.height = Math.ceil(h * scale) + 'px';
+
+  /* A page that flows across several sheets must not be boxed to a fixed
+     height, or everything past the first sheet is clipped away. And a card
+     taller than one sheet cannot be kept whole: telling the browser to avoid
+     breaking inside it makes it drop the overflow rather than continue on the
+     next sheet — which is exactly how a long Action Plan card lost its lower
+     half. Those are marked breakable; the pieces inside them still stay whole,
+     so the break lands between blocks instead of through a table row. */
+  const tall = scale >= 1 && h > H;
+  page.classList.toggle('tall', tall);
+  if(tall){
+    page.style.height = '';
+    inner.querySelectorAll('.card, section').forEach(el => {
+      el.classList.toggle('brk', el.getBoundingClientRect().height > H);
+    });
+  } else {
+    page.style.height = Math.ceil(h * scale) + 'px';
+  }
 }
 
 /** Counters and bars are animated on screen; on paper they must simply be
