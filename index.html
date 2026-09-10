@@ -394,6 +394,15 @@ table.edtbl td{padding:7px 9px}
 html.printfit .printonly{display:block!important}
 html.printfit .noprintfit{display:none!important}
 
+/* drop anywhere */
+#dropveil{position:fixed;inset:0;z-index:210;background:color-mix(in srgb,var(--bg) 78%,transparent);
+  display:flex;align-items:center;justify-content:center;pointer-events:none}
+#dropveil[hidden]{display:none!important}
+#dropveil > div{display:flex;flex-direction:column;gap:7px;align-items:center;text-align:center;
+  padding:34px 46px;border:2px dashed var(--brand);border-radius:20px;background:var(--surface)}
+#dropveil b{font-size:var(--t-xl);color:var(--brand)}
+#dropveil span{font-size:var(--t-xs);color:var(--muted);line-height:var(--lh-body)}
+
 /* deploy dialog */
 #deployWrap{position:fixed;inset:0;z-index:220;background:rgb(0 0 0/.62);display:flex;
   align-items:center;justify-content:center;padding:24px;overflow:auto}
@@ -571,6 +580,9 @@ html.printfit .page.tall,#printroot .printpage.tall{
       ไม่มีรหัสผ่านที่ถูกต้องก็เปิดอ่านไม่ได้จริง ๆ ไม่ใช่แค่ซ่อนหน้าจอ ·
       การถอดรหัสเกิดขึ้นในเครื่องคุณ ไม่มีการส่งรหัสผ่านออกไปที่ไหน</p>
   </form>
+</div>
+<div id="dropveil" hidden>
+  <div><b>วางไฟล์ตรงไหนก็ได้</b><span>.xlsx · .xls · .csv — จะรวมเข้าฐานข้อมูลตามเลขที่งาน ของเก่าไม่หาย</span></div>
 </div>
 <div id="app">
   <aside id="rail">
@@ -6801,7 +6813,9 @@ function renderTop(){
     <button class="btn sm ghost" id="aTheme" title="สลับโหมดสว่าง/มืด">◐</button>
     <button class="btn sm" id="aPrintAll" title="พิมพ์ทุกหน้าเป็น PDF ชุดเดียว">PDF ทุกหน้า</button>
     <button class="btn sm ghost" id="aPrint" title="พิมพ์เฉพาะหน้าที่เปิดอยู่">หน้านี้</button>
-    <button class="btn sm" id="aNew" title="ดูไฟล์ที่บันทึกไว้ เพิ่มหรืออัปเดตข้อมูล">📁 ข้อมูล <span style="color:var(--muted)">${S.sources.length}</span></button>
+    <button class="btn sm" id="aAdd" style="border-color:var(--brand);color:var(--brand)"
+      title="เลือกไฟล์เดือนใหม่มาเติมเข้าฐานข้อมูล — รวมกันตามเลขที่งาน ของเก่าไม่หาย">➕ เพิ่มไฟล์</button>
+    <button class="btn sm ghost" id="aNew" title="ดูไฟล์ที่บันทึกไว้ทั้งหมด">📁 ข้อมูล <span style="color:var(--muted)">${S.sources.length}</span></button>
     ${deployButton()}`;
 }
 
@@ -6891,7 +6905,43 @@ function closeDrill(){ S.drill = null; $('drill').className = ''; $('drill').inn
 /* ==========================================================================
    15. EVENTS
    ========================================================================== */
+/** Files can arrive from the toolbar button, the gate, or a drop anywhere on
+    the page. They all end here so the merge behaves identically whichever way
+    the file came in. */
+function takeFiles(list){
+  if(!list || !list.length) return;
+  loadFiles([...list].map(f => ({file: f, path: f.webkitRelativePath || f.name})));
+}
+const gateOpen = () => $('gate').style.display !== 'none';
+
 function bindGlobalEvents(){
+  const input = $('file');
+  input.onchange = e => { takeFiles(e.target.files); e.target.value = ''; };
+
+  /* Dropping a file anywhere is the fastest way to add a month, so the whole
+     window accepts it — previously only the gate did, which meant the drop
+     silently did nothing unless that screen happened to be open. */
+  const veil = $('dropveil');
+  let depth = 0;
+  window.addEventListener('dragenter', e => {
+    // the file screen has its own drop zone; two handlers on one drop would
+    // read the same file twice
+    if(gateOpen()) return;
+    if(![...(e.dataTransfer && e.dataTransfer.types || [])].includes('Files')) return;
+    e.preventDefault(); depth++; veil.hidden = false;
+  });
+  window.addEventListener('dragover', e => {
+    if(!veil.hidden) e.preventDefault();
+  });
+  window.addEventListener('dragleave', e => {
+    if(--depth <= 0){ depth = 0; veil.hidden = true; }
+  });
+  window.addEventListener('drop', e => {
+    if(veil.hidden) return;
+    e.preventDefault(); depth = 0; veil.hidden = true;
+    takeFiles(e.dataTransfer.files);
+  });
+
   document.addEventListener('click', e => {
     const t = e.target;
     const go = t.closest('[data-go]');
@@ -7115,6 +7165,7 @@ function bindGlobalEvents(){
       printMode = 'one'; fitForPrint(); window.print();
       setTimeout(function(){ unfitPrint(); render(); }, 0); return;
     }
+    if(t.id === 'aAdd'){ $('file').click(); return; }
     if(t.id === 'aNew'){ openGate(); return; }
     if(t.id === 'gateClose'){ if(S.raw.length) closeGate(); return; }
     const bs = t.closest('[data-brand]');
@@ -7623,6 +7674,7 @@ async function loadFiles(list, opt){
   if(!S.raw.length && !rosters.length){
     S.sources = S.sources.slice(0, before);
     gateMsg('<b>อ่านข้อมูลไม่ได้</b><br>' + (errs.join('<br>') || 'ไม่พบข้อมูลในไฟล์'), 'err');
+    if(!gateOpen()) openGate();
     return;
   }
   const where = await saveDataset();
@@ -7644,7 +7696,11 @@ async function loadFiles(list, opt){
   note.push(lockOn() ? '⚠ ยังไม่ได้บันทึกลงฐานข้อมูล — กดปุ่ม 🚀 Deploy'
     : where ? 'บันทึกไว้ในเครื่องแล้ว (' + fmtKB(where.bytes) + ')'
             : '⚠ เบราว์เซอร์นี้บันทึกข้อมูลถาวรไม่ได้ ต้องลากไฟล์ใหม่ทุกครั้ง');
-  if(errs.length) gateMsg('<b>อ่านได้บางส่วน</b><br>' + errs.join('<br>'), 'err');
+  if(errs.length){
+    gateMsg('<b>อ่านได้บางส่วน</b><br>' + errs.join('<br>'), 'err');
+    // the message lives inside the gate, so show the gate or nobody sees it
+    if(!gateOpen()) openGate();
+  }
   start({note: note.join(' · ')});
 }
 function start(opt){
@@ -7836,15 +7892,9 @@ function demoGrid(){
     }
     if(dt.files.length) loadFiles(dt.files);
   });
-  addEventListener('dragover', e => e.preventDefault());
-  // dropping a file anywhere in the app — not just on the gate — updates the set
-  addEventListener('drop', e => {
-    e.preventDefault();
-    if($('gate').style.display !== 'none') return;      // the gate handles its own
-    if(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length){
-      openGate(); loadFiles(e.dataTransfer.files);
-    }
-  });
+  /* Dropping anywhere in the app is handled once, at boot, in bindGlobalEvents.
+     It used to be wired here instead — which meant it did not exist until this
+     screen had been opened once, and then got wired again on every reopen. */
 
   $('demo').onclick = async e => {
     e.stopPropagation();
