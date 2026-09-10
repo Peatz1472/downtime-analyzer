@@ -2383,6 +2383,32 @@ function sharedPlanNote(){
   </div>`;
 }
 
+/** Shown on EVERY page while this tab holds ticket files the published
+    database does not have. A published copy stores nothing on the visitor's
+    machine by design, so an added file lives only until the next refresh —
+    that is a fine rule and a terrible surprise, hence a standing notice with
+    the save button in it rather than a toast that scrolls away. */
+function pendingDataNote(){
+  const add = unsavedAdds();
+  if(!add.length) return '';
+  const grew = S.raw.length - publishedRows;
+  return `
+  <div class="banner crit" style="margin:0 0 12px"><span class="i">⚠</span>
+    <div style="flex:1">
+      <b>ไฟล์ที่เพิ่งเพิ่มยังไม่ได้อยู่ในฐานข้อมูล — รีเฟรชแล้วจะหาย</b>
+      <p style="margin-top:3px;color:var(--muted);font-size:var(--t-xs);line-height:var(--lh-body)">
+        ${add.map(s => esc(s.name)).join(' · ')}<br>
+        ฐานข้อมูลจะเป็น <b>${n0(publishedRows)} → ${n0(S.raw.length)}</b> ใบงาน
+        ${grew > 0 ? '(<b>+' + n0(grew) + '</b> ใบใหม่)' : '(เลขที่งานซ้ำ ใช้ค่าจากไฟล์ใหม่)'} ·
+        <b>ของเก่าไม่หาย</b> รวมกันตามเลขที่งาน</p>
+      <div style="display:flex;gap:7px;margin-top:8px;flex-wrap:wrap">
+        <button class="btn sm primary" id="pendDeploy">🚀 บันทึกลงฐานข้อมูล</button>
+        <button class="btn sm ghost" id="pendDrop">ทิ้งไฟล์ที่เพิ่งมา</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 /* --- exporting, so the next publish can carry it -------------------------- */
 
 function fileDownload(name, text, type){
@@ -2622,6 +2648,8 @@ function deployDialog(){
         'อัปเดตข้อมูลจากหน้าเว็บ · ' + n0(S.raw.length) + ' ใบงาน · ' + n0(S.actions.length) + ' งาน');
       markSeen('');
       lockMeta = sealed;
+      // the published database now contains what was added in this tab
+      clearUnsaved(); setPublishedRows(S.raw.length);
       done(step(true, 'เข้ารหัสแล้ว') + step(true, 'ส่งขึ้น GitHub แล้ว'),
         'https://peatz1472.github.io/downtime-analyzer/');
     } catch(e){ fail(e.message || String(e)); }
@@ -3018,6 +3046,16 @@ function idbTx(mode, fn){
 const idbGet = k => idbTx('readonly',  st => st.get(k));
 const idbPut = (k, v) => idbTx('readwrite', st => st.put(v, k));
 const idbDel = k => idbTx('readwrite', st => st.delete(k));
+
+/* On a published copy the database is the encrypted file itself, so a file
+   dropped in now lives ONLY in this tab until it is deployed. These two track
+   that gap so the page can say so instead of letting a refresh eat the work. */
+let publishedRows = 0;
+const setPublishedRows = n => { publishedRows = n; };
+/** Files added or re-read in this tab that the published database does not
+    have yet. Empty on a local build, where saving to the browser is real. */
+const unsavedAdds = () => (lockOn() ? S.sources.filter(s => s.dirty) : []);
+const clearUnsaved = () => { S.sources.forEach(s => { delete s.dirty; }); };
 
 /** Where the last save actually landed — shown to the user, because "your data
     is saved" is a promise the app has to be able to back up. */
@@ -6637,7 +6675,7 @@ function render(){
   const view = $('view');
   const fn = P[S.page] || P.overview;
   const keepY = S.quiet ? view.scrollTop : 0;
-  view.innerHTML = `<div class="page">${sharedPlanNote()}${fn(C)}</div>`;
+  view.innerHTML = `<div class="page">${sharedPlanNote()}${pendingDataNote()}${fn(C)}</div>`;
   view.scrollTop = keepY;
   mountCharts(view, C);
   // A quiet render is a data-editor keystroke, not a page change: replaying the
@@ -6961,6 +6999,19 @@ function bindGlobalEvents(){
       saveActions(); renderEditor(); return;
     }
     if(t.id === 'deployBtn'){ deployDialog(); return; }
+    if(t.id === 'pendDeploy'){ deployDialog(); return; }
+    if(t.id === 'pendDrop'){
+      const add = unsavedAdds();
+      if(!confirm('ทิ้งไฟล์ที่เพิ่งมา ' + add.length + ' ไฟล์?\n\n' +
+        add.map(s => s.name).join('\n') + '\n\nฐานข้อมูลที่เผยแพร่ไว้จะไม่ถูกแตะ')) return;
+      /* Go back to what the published database holds, rather than subtracting
+         the dirty sources: re-reading a file that is already IN the database
+         marks that same source dirty, so removing it would take the published
+         copy with it and silently shrink the database. */
+      S.notice = 'ทิ้งไฟล์ที่เพิ่งมาแล้ว · กลับมาที่ฐานข้อมูลที่เผยแพร่ไว้';
+      openWithData();
+      return;
+    }
     const ab = t.closest('[data-actbrand]');
     if(ab){
       const a = S.actions[Number(ab.dataset.actbrand)];
@@ -7561,7 +7612,8 @@ async function loadFiles(list, opt){
           'และคอลัมน์ชื่อช่างอย่างน้อย 2 คอลัมน์</span>'); continue;
       }
       (S.sources.some(s => s.name === f.name) ? updated : added).push(f.name);
-      mergeSource({name: f.name, hint, grid: parsed.grid});
+      // dirty = present here but not in the published database yet
+      mergeSource({name: f.name, hint, grid: parsed.grid, dirty: true});
     }catch(err){ errs.push(esc(f.name) + ' — ' + esc(err.message)); }
   }
   const replaced = rebuildFromSources();
@@ -7586,8 +7638,12 @@ async function loadFiles(list, opt){
   if(added.length) note.push('เพิ่มไฟล์ใหม่ ' + added.length);
   if(updated.length) note.push('อ่านไฟล์เดิมทับ ' + updated.length);
   if(replaced) note.push('เลขที่งานซ้ำ ' + n0(replaced) + ' รายการ — ใช้ค่าจากไฟล์ล่าสุด');
-  note.push(where ? 'บันทึกไว้ในเครื่องแล้ว (' + fmtKB(where.bytes) + ')'
-                  : '⚠ เบราว์เซอร์นี้บันทึกข้อมูลถาวรไม่ได้ ต้องลากไฟล์ใหม่ทุกครั้ง');
+  /* A published copy deliberately stores nothing on the visitor's machine, so
+     claiming "saved" here would be a lie that costs the user their work at the
+     next refresh. Say what is actually true and where the save button is. */
+  note.push(lockOn() ? '⚠ ยังไม่ได้บันทึกลงฐานข้อมูล — กดปุ่ม 🚀 Deploy'
+    : where ? 'บันทึกไว้ในเครื่องแล้ว (' + fmtKB(where.bytes) + ')'
+            : '⚠ เบราว์เซอร์นี้บันทึกข้อมูลถาวรไม่ได้ ต้องลากไฟล์ใหม่ทุกครั้ง');
   if(errs.length) gateMsg('<b>อ่านได้บางส่วน</b><br>' + errs.join('<br>'), 'err');
   start({note: note.join(' · ')});
 }
@@ -7800,6 +7856,13 @@ function demoGrid(){
       (where ? '' : ' · เบราว์เซอร์นี้บันทึกถาวรไม่ได้')});
   };
 
+  /* The one thing a published copy cannot do is keep a dropped file across a
+     refresh. Say so before the tab closes, rather than after. */
+  window.addEventListener('beforeunload', e => {
+    if(!unsavedAdds().length) return;
+    e.preventDefault(); e.returnValue = '';
+  });
+
   bindGlobalEvents();
 
   /* A published copy carries the baseline encrypted, so nothing can be read
@@ -7831,6 +7894,7 @@ async function openWithData(){
   if(base){
     S.sources = base.sources.map(s => Object.assign({}, s));
     rebuildFromSources();
+    setPublishedRows(S.raw.length);
     if(S.raw.length){
       const ms = uniq(S.raw.map(r => r.month).filter(Boolean)).sort();
       start({note: `เปิดด้วยข้อมูลตั้งต้นที่ฝังมากับไฟล์ · ${n0(S.raw.length)} แถว · ` +
