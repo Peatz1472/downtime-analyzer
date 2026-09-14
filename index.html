@@ -827,15 +827,31 @@ const FIELDS=[
   ['repairStatus','การดำเนินการซ่อม',     ['การดำเนินการซ่อม'], false],
   ['staffFix',   'พนักงานหน้าร้านแก้เองได้ไหม', ['การแก้ไข'], false],
   ['delayReason','สาเหตุที่ยังไม่ปิดงานตามกำหนด', ['สาเหตุที่ยังไม่ปิดงานตามกำหนด'], false],
+  // What the technician found and did, written by the technician. Neither export
+  // carries these yet — they are being added to the form — so they sit last and
+  // only claim a column nothing above wants. อาการ is the symptom as SEEN;
+  // รายละเอียดปัญหา above stays the ticket's own description.
+  ['symptom',   'อาการ (ช่างบันทึก)',     ['อาการเสีย','อาการที่พบ','อาการของเครื่อง','อาการ','symptom'], false],
+  ['rootCause', 'สาเหตุ (ช่างบันทึก)',    ['สาเหตุที่เสีย','สาเหตุของปัญหา','สาเหตุปัญหา','สาเหตุการเสีย','สาเหตุ','ต้นเหตุ','rootcause','cause'], false],
+  ['techFix',   'วิธีแก้ (ช่างบันทึก)',   ['วิธีแก้ไข','วิธีการแก้ไข','สิ่งที่ช่างแก้ไข','การแก้ไขของช่าง','รายละเอียดการซ่อม','รายละเอียดการแก้ไข','วิธีซ่อม','fixdetail'], false],
 ];
 const norm=s=>String(s??'').toLowerCase().replace(/\s+/g,'').replace(/[()（）\[\]"'`]/g,'').replace(/[​﻿]/g,'');
+/* Exact names are settled for EVERY field before any field may take a column by
+   prefix. Done field by field, an earlier field's loose prefix match could take
+   a column that a later field names exactly — "การแก้ไข" (staff fix, prefix)
+   would swallow a new "การแก้ไขของช่าง" column meant for the technician's fix. */
 function mapHeader(header){
   const idx={},used=new Set(),H=header.map(norm);
   for(const [key,,aliases] of FIELDS){
     let found=-1;
     for(const a of aliases){ const t=norm(a);
       found=H.findIndex((h,i)=>!used.has(i)&&h===t); if(found>=0) break; }
-    if(found<0) for(const a of aliases){ const t=norm(a);
+    idx[key]=found; if(found>=0) used.add(found);
+  }
+  for(const [key,,aliases] of FIELDS){
+    if(idx[key]>=0) continue;
+    let found=-1;
+    for(const a of aliases){ const t=norm(a);
       found=H.findIndex((h,i)=>!used.has(i)&&h&&(h.startsWith(t)||t.startsWith(h))&&Math.min(h.length,t.length)>=6); if(found>=0) break; }
     idx[key]=found; if(found>=0) used.add(found);
   }
@@ -975,7 +991,8 @@ function buildRecords(grid,sourceName,brandHint){
     // A branch code with no recognisable prefix inherits the brand from the
     // folder the file sat in (datateh/qw -> QW, datateh/wag -> WAG).
     if(brandHint&&(b.brand==='OTHER'||!b.brand)) b.brand=brandHint;
-    const detail=at(r,'detail');
+    // a book that only has อาการ still needs a description to classify from
+    const detail=at(r,'detail')||at(r,'symptom');
     const equipRaw=at(r,'equipGroup');
     const {category,guessed,source:catSource}=resolveCategory(at(r,'category'),equipRaw,detail);
     if(catSource==='keyword')
@@ -1012,6 +1029,7 @@ function buildRecords(grid,sourceName,brandHint){
       staffFix:(()=>{const v=at(r,'staffFix');
         return /^ไม่สามารถ/.test(v)?false:/^แก้ไขด้วยตัวเอง/.test(v)?true:null;})(),
       delayReason:at(r,'delayReason'),
+      symptom:at(r,'symptom'),rootCause:at(r,'rootCause'),techFix:at(r,'techFix'),
       startMs,endMs,hours,hoursSource:src,
       hoursCol:at(r,'hoursCol'),
     });
@@ -2732,8 +2750,10 @@ function repeatSummary(recs, minRepeat){
 }
 
 /** Downtime that a % cut on one group would return, per month. Always an
-    ESTIMATE until a real before/after exists (§33.8). */
-const savingOf = (group, months, cutPct) => (group.hours / Math.max(1, months)) * (cutPct / 100);
+    ESTIMATE until a real before/after exists (§33.8). Per month NOW — the last
+    three complete months (see 10b PERIOD) — not an all-time average that still
+    remembers problems long since fixed. */
+const savingOf = (group, months, cutPct) => rateOf(group.recs) * (cutPct / 100);
 
 /* ==========================================================================
    6b. EDIT LAYER — corrections and exclusions, without touching the file
@@ -3177,6 +3197,9 @@ function rebuildFromSources(){
     s.rows = recs.length;
     s.unmapped = unmapped;
     s.missing = REQUIRED.filter(([k]) => mapping[k] < 0).map(([, l]) => l);
+    // which header, if any, fed each technician column — shown on Data Quality
+    // so a renamed column is noticed rather than silently ignored
+    s.techCols = ['symptom', 'rootCause', 'techFix'].map(k => mapping[k] >= 0 ? String(s.grid[0][mapping[k]]) : '');
     S.issues.push(...issues);
     for(const r of recs){
       const job = String(r.jobNo || '').trim();
@@ -3239,7 +3262,9 @@ const S = {
   dim: 'category',
   minRepeat: 2,
   targetPct: 20,
-  baseline: null,
+  baseline: null,        // used only when cmpMode is 'manual'
+  cmpMode: 'prev',       // what "ตอนนี้" is compared with — see 10b PERIOD
+  curMonth: '',          // '' = the latest complete month
   thBasis: 'median',
   cuts: {},              // saving simulator: group key -> % reduction
   actions: [],           // action plan, persisted per browser
@@ -3310,9 +3335,12 @@ function ctx(){
     : all;
 
   const o = overview(recs);
-  const base = S.baseline != null ? S.baseline : Math.round(o.perMonth * 10) / 10;
-  const tgt = base * (1 - S.targetPct / 100);
-  const need = base - tgt;
+  // "ตอนนี้" is a month and the base is chosen — never the all-time average
+  const per = PER = period(kept, recs);
+  const {base, tgt, need} = per;
+  // an action is measured across its whole history, whatever month range the
+  // bar happens to be narrowed to — a "from" filter must not erase its "before"
+  const measureRecs = applyFilters(kept, Object.assign({}, S.f, {from: '', to: ''}));
   const groups = groupBy(recs, dimFn());
   const byHours = pareto(groups, 'hours');
   const byCount = pareto(groups, 'count');
@@ -3324,7 +3352,7 @@ function ctx(){
   const planned = sum(byHours.map(r => savingOf(r, o.months, S.cuts[r.key] || 0)));
   const editCount = Object.keys(S.edits).length;
   const droppedHours = sum(dropped.filter(r => r.hours != null), r => r.hours);
-  return {recs, all, corrected, dropped, o, base, tgt, need, groups, byHours, byCount,
+  return {recs, all, kept, measureRecs, corrected, dropped, o, per, base, tgt, need, groups, byHours, byCount,
     q, scored, tr, br, rs, planned, editCount, droppedHours};
 }
 
@@ -3398,11 +3426,14 @@ const P = {};
 
 /* ---------- 🏠 OVERVIEW — "ตอนนี้เราดีขึ้นหรือแย่ลง?" ---------- */
 P.overview = c => {
-  const {o, base, tgt, need, byHours, br, rs} = c;
-  const onTarget = o.perMonth <= tgt;
-  const gap = Math.max(0, o.perMonth - tgt);
+  const {o, per, base, tgt, need, byHours, br, rs} = c;
+  const {cur, gap, onTarget, progress, chg} = per;
   const top3 = byHours.slice(0, 3);
-  const progress = base > 0 ? Math.min(100, Math.max(0, (base - o.perMonth) / Math.max(1e-9, need) * 100)) : 0;
+  const curL = monthLabel(per.curMonth);
+  const tone = chgTone(chg);
+  const moved = chg == null ? 'ยังไม่มีเดือนก่อนหน้าให้เทียบ'
+    : `${chg <= 0 ? '▼ ลดลง' : '▲ เพิ่มขึ้น'} ${hr(Math.abs(per.delta))} (${signPct(chg)}) เทียบกับ${per.baseName}`;
+  const note = periodNote(per);
 
   return `
   <div class="ph reveal">
@@ -3416,26 +3447,31 @@ P.overview = c => {
   ${editBanner(c)}
   ${coverageBanner(c)}
 
-  <div class="grid g5" style="margin-bottom:14px">
-    ${kpiCard({label:'Downtime รวม (เวลาที่เครื่องหยุด)', raw:o.hours, dp:1, unit:'ชม.',
-      sub:`ตลอด ${o.months} เดือนในช่วงที่เลือก`, tone:'info', d:1})}
-    ${kpiCard({label:'เฉลี่ยต่อเดือน', raw:o.perMonth, dp:1, unit:'ชม.',
-      sub:'ค่าที่ใช้เป็น Baseline', tone:'warn', d:2})}
+  <div class="grid g5" style="margin-bottom:${note ? 8 : 14}px">
+    ${kpiCard({label:`Downtime เดือน ${curL}`, raw:cur, dp:1, unit:'ชม.',
+      sub:`${n0(per.curCount)} ใบงาน${per.curPartial ? ' · <b style="color:var(--warn-ink)">ยังไม่จบเดือน</b>' : ''}`,
+      tone: per.curPartial ? 'warn' : 'info', d:1})}
+    ${kpiCard({label:'ฐานที่ใช้เทียบ', raw:base, dp:1, unit:'ชม./เดือน',
+      sub: esc(per.baseName), tone:'warn', d:2})}
+    ${kpiCard({label:'เปลี่ยนแปลงจากฐาน', value: signPct(chg), unit:'',
+      sub: chg == null ? 'ยังไม่มีเดือนก่อนหน้าให้เทียบ'
+        : `${chg <= 0 ? '▼ ลดลง' : '▲ เพิ่มขึ้น'} ${hr(Math.abs(per.delta))}`,
+      tone: tone || 'info', d:3})}
     ${kpiCard({label:'เป้าหมาย (Target)', raw:tgt, dp:1, unit:'ชม./เดือน',
-      sub:`ลด ${S.targetPct}% จาก ${n1(base)} ชม.`, tone:'good', d:3})}
+      sub:`ลด ${S.targetPct}% จากฐาน ${n1(base)} ชม.`, tone:'good', d:4})}
     ${kpiCard({label:'ส่วนต่างที่ต้องลด (Gap)', raw:gap, dp:1, unit:'ชม./เดือน',
-      sub: onTarget ? '🎉 ถึงเป้าหมายแล้ว' : '↓ ต้องลดให้ได้เท่านี้', tone: onTarget ? 'good' : 'crit', d:4})}
-    ${kpiCard({label:'เป้าลด (Reduction Target)', value:S.targetPct + '%', unit:'',
-      sub:`= ${n1(need)} ชม./เดือน`, tone:'info', pct:Math.min(100, progress), d:5})}
+      sub: onTarget ? '🎉 ถึงเป้าหมายแล้ว' : `↓ ต้องลดอีกเท่านี้ในเดือน ${curL}`,
+      tone: onTarget ? 'good' : 'crit', pct: progress, d:5})}
   </div>
+  ${note ? `<p class="reveal" style="font-size:var(--t-xs);color:var(--muted);margin:0 0 14px">${note}</p>` : ''}
 
   <section class="card ${onTarget ? '' : 'crit'} reveal" id="hero" data-d="2" style="margin-bottom:14px">
     <div style="position:relative;z-index:1">
-      <p class="eyebrow">ภารกิจของเรา</p>
+      <p class="eyebrow">ภารกิจของเรา — เดือน ${esc(curL)} เทียบกับ${esc(per.baseName)}</p>
       <div style="display:flex;align-items:center;gap:clamp(14px,4vw,44px);flex-wrap:wrap;margin-top:12px">
         <div>
-          <div class="heroNum tab" style="color:var(--crit-ink)"><span data-count="${o.perMonth}" data-dp="1">0</span></div>
-          <div class="eyebrow" style="margin-top:6px">ตอนนี้ (ชม./เดือน)</div>
+          <div class="heroNum tab" style="color:${tone === 'good' ? 'var(--good-ink)' : 'var(--crit-ink)'}"><span data-count="${cur}" data-dp="1">0</span></div>
+          <div class="eyebrow" style="margin-top:6px">เดือน ${esc(curL)} (ชม.)</div>
         </div>
         <div class="heroArrow">→</div>
         <div>
@@ -3447,13 +3483,15 @@ P.overview = c => {
             <i data-pct="${Math.min(100, progress)}" style="background:linear-gradient(90deg,var(--warn),var(--good))"></i>
           </div>
           <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:12.5px;color:var(--muted)">
-            <span class="tab">Baseline ${n1(base)}</span><span class="tab">Target ${n1(tgt)}</span>
+            <span class="tab">ฐาน ${n1(base)}</span><span class="tab">เป้า ${n1(tgt)}</span>
           </div>
           <p style="margin-top:12px;font-size:clamp(15px,2.2vw,21px);font-weight:750;letter-spacing:-.02em;
              color:${onTarget ? 'var(--good-ink)' : 'var(--crit-ink)'}">
-            ${onTarget ? '🎯 TARGET REACHED — ต่ำกว่าเป้าแล้ว ' + hr(tgt - o.perMonth)
+            ${onTarget ? '🎯 TARGET REACHED — ต่ำกว่าเป้าแล้ว ' + hr(tgt - cur)
                        : 'ยังต้องลดอีก ' + hr(gap) + ' / เดือน'}
           </p>
+          <p style="margin-top:4px;font-size:var(--t-sm);font-weight:650;
+             color:${tone === 'good' ? 'var(--good-ink)' : tone === 'crit' ? 'var(--crit-ink)' : 'var(--muted)'}">${moved}</p>
         </div>
       </div>
     </div>
@@ -3463,8 +3501,8 @@ P.overview = c => {
     ${bare('แนวโน้มรายเดือน (Monthly Trend)',
       `<div class="bd">${legend([{label:'Downtime จริง', color:'var(--s1)'},
         {label:'เป้าหมาย ' + n0(tgt) + ' ชม.', color:'var(--good)', dash:1}])}
-        <div data-ch="trend"></div></div>`,
-      'จุดกลวงสีแดง = เดือนที่ข้อมูลไม่ครบ อย่าอ่านว่าดีขึ้น')}
+        <div data-ch="trend"></div>${momStrip(per, 6)}</div>`,
+      'จุดกลวงสีแดง = เดือนที่ข้อมูลไม่ครบ อย่าอ่านว่าดีขึ้น · แถวล่าง = แต่ละเดือนเทียบกับเดือนก่อน')}
     ${bare('🔥 TOP 3 ปัญหาหลัก',
       `<div class="bd" style="display:flex;flex-direction:column;gap:10px">
         ${top3.length ? top3.map((r, i) => `
@@ -3529,6 +3567,20 @@ P.overview = c => {
         <p style="margin-top:12px;font-size:14px;font-weight:700;color:${c.planned >= need ? 'var(--good-ink)' : 'var(--crit-ink)'}">
           ${c.planned >= need ? '🟢 ON TRACK' : '🔴 NEED MORE ACTION — ยังขาด ' + hr(need - c.planned)}</p>
         <button class="btn sm primary" style="margin-top:11px" data-go="saving">เปิด Saving Simulator →</button>
+        ${(() => {
+          /* The plan's real result belongs next to its estimate — this is where
+             someone looks first after adding a month. */
+          const ms = S.actions.filter(a => a && a.scope).map(a => actionMeasure(a, c));
+          if(!ms.length) return '';
+          const ok = ms.filter(m => m.state === 'ok');
+          const down = ok.filter(m => m.chg <= -10).length, up = ok.filter(m => m.chg >= 10).length;
+          const wait = ms.filter(m => m.state === 'wait').length, nodate = ms.filter(m => m.state === 'nodate').length;
+          return `<div style="margin-top:13px;padding-top:11px;border-top:1px solid var(--line);font-size:var(--t-xs);color:var(--muted)">
+            <b style="color:var(--ink)">📈 ผล Action Plan จากข้อมูลจริง</b><br>
+            ${ok.length ? `<b style="color:var(--good-ink)">ลดลง ${down}</b> · <b style="color:var(--crit-ink)">เพิ่มขึ้น ${up}</b> · ทรงตัว ${ok.length - down - up}` : 'ยังไม่มีงานที่วัดผลได้'}
+            ${wait ? ` · รอข้อมูล ${wait}` : ''}${nodate ? ` · <span style="color:var(--warn-ink)">ยังไม่ใส่วันเริ่ม ${nodate}</span>` : ''}
+            <br><button class="btn sm ghost" style="margin-top:7px" data-go="action">ดูผลรายงาน →</button></div>`;
+        })()}
       </div>`)}
   </div>`;
 };
@@ -3732,6 +3784,193 @@ P.priority = c => {
   </div>`;
 };
 
+/* ==========================================================================
+   10b. PERIOD — "ตอนนี้" is one month, compared against a base the user picks
+   The page used to call the average of every month in the file "ตอนนี้" and
+   set the target 20% below that. Two things were wrong with it. The file
+   starts with months whose durations were never filled in, which dragged the
+   average down, so the most recent months always looked like a failure. And an
+   average of 21 months cannot move when this month improves — the work the
+   team does now is invisible in it.
+
+   So: "ตอนนี้" is the latest COMPLETE month, the base is what the user chooses
+   (the month before, the three before, every month before, or a number), and
+   the % is this month against that base. A part-month — the export was pulled
+   mid-month — is never used as "ตอนนี้" unless someone picks it on purpose,
+   because half a month of downtime always looks like a halving.
+   ========================================================================== */
+const CMP_MODES = [
+  ['prev',   'เดือนก่อนหน้า'],
+  ['avg3',   'เฉลี่ย 3 เดือนก่อนหน้า'],
+  ['all',    'เฉลี่ยทุกเดือนก่อนหน้า'],
+  ['manual', 'ตัวเลขที่กำหนดเอง'],
+];
+const VIEW_KEY = 'dra.view.v1';
+/* A viewing preference, not ticket data — so it may live in the browser even on
+   the published copy, the way the theme does. */
+function loadView(){
+  try {
+    const v = JSON.parse(localStorage.getItem(VIEW_KEY) || '{}');
+    if(CMP_MODES.some(m => m[0] === v.cmpMode)) S.cmpMode = v.cmpMode;
+    if(v.targetPct > 0 && v.targetPct < 100) S.targetPct = v.targetPct;
+    if(v.baseline > 0) S.baseline = v.baseline;
+  } catch(e){}
+}
+function saveView(){
+  try { localStorage.setItem(VIEW_KEY, JSON.stringify(
+    {cmpMode: S.cmpMode, targetPct: S.targetPct, baseline: S.baseline})); } catch(e){}
+}
+
+const addMonth = (m, k) => {
+  const [y, mo] = String(m).split('-').map(Number);
+  return new Date(Date.UTC(y, mo - 1 + k, 1)).toISOString().slice(0, 7);
+};
+const daysIn = m => {
+  const [y, mo] = String(m).split('-').map(Number);
+  return new Date(Date.UTC(y, mo, 0)).getUTCDate();
+};
+/** "2026-06".."2026-08" -> "มิ.ย. – ส.ค. 69 (3 เดือน)" */
+function monthsLabel(ms){
+  if(!ms || !ms.length) return '—';
+  if(ms.length === 1) return monthLabel(ms[0]);
+  return monthLabel(ms[0]) + ' – ' + monthLabel(ms[ms.length - 1]) + ' · ' + ms.length + ' เดือน';
+}
+
+/** Every calendar month the data spans, and whether the last one is finished.
+    Decided from the date of the last ticket in the whole database, not from a
+    filtered view — one branch can easily have no ticket in the last week. */
+function monthAxis(kept){
+  const ms = uniq(kept.map(r => r.month).filter(Boolean)).sort();
+  if(!ms.length) return {months: [], partial: null};
+  const months = [];
+  for(let m = ms[0]; m <= ms[ms.length - 1]; m = addMonth(m, 1)) months.push(m);
+  const last = months[months.length - 1];
+  const lastDate = kept.filter(r => r.month === last).map(r => r.date).filter(Boolean).sort().pop() || '';
+  const day = Number(lastDate.slice(8, 10)) || 0;
+  const thisMonth = new Date().toISOString().slice(0, 7);
+  const partial = (day < daysIn(last) - 1 || last >= thisMonth)
+    ? {month: last, lastDate, day, days: daysIn(last)} : null;
+  return {months, partial};
+}
+
+/** The one place "ตอนนี้", the base, the target and the % are decided. Every
+    page reads the result, so no two pages can disagree about them. */
+let PER = null;
+function period(kept, recs){
+  const f = S.f;
+  const ax = monthAxis(kept);
+  const months = ax.months.filter(m => (!f.from || m >= f.from) && (!f.to || m <= f.to));
+  // coverage is judged on every ticket of the whole fleet: a month whose
+  // durations were mostly never filled in says nothing about downtime, whatever
+  // view is selected (2025-04 has six "stopped" tickets all timed, and 23% of
+  // its tickets timed overall — it is not a month to compare against)
+  const fleet = new Map(trend(kept).map(m => [m.month, m]));
+  const usable = m => { const x = fleet.get(m); return !!x && x.coverage >= 60; };
+  const complete = m => !(ax.partial && ax.partial.month === m);
+  const own = new Map(trend(recs).map(m => [m.month, m]));
+  const hoursIn = m => (own.get(m) || {hours: 0}).hours;
+  const countIn = m => (own.get(m) || {count: 0}).count;
+
+  const auto = [...months].reverse().find(m => complete(m) && usable(m)) || months[months.length - 1] || '';
+  const curMonth = S.curMonth && months.includes(S.curMonth) ? S.curMonth : auto;
+  const before = months.filter(m => m < curMonth && complete(m) && usable(m));
+  const mode = CMP_MODES.some(x => x[0] === S.cmpMode) ? S.cmpMode : 'prev';
+  const manual = mode === 'manual' && S.baseline != null;
+  const win = mode === 'prev' ? before.slice(-1)
+            : mode === 'all'  ? before
+            : before.slice(-3);                       // avg3 (and manual, for its label)
+  /* One job's or one system's hours swing from 0 to 300 between single months,
+     so "per month now" for a group is the three complete months ending at the
+     month being looked at — steady enough to estimate a % cut against, and
+     still about now rather than about last year. */
+  const rateMonths = months.filter(m => m <= curMonth && complete(m) && usable(m)).slice(-3);
+  const avg = ms => ms.length ? sum(ms.map(hoursIn)) / ms.length : 0;
+
+  const cur = hoursIn(curMonth);
+  const base = manual ? S.baseline : Math.round(avg(win) * 10) / 10;
+  const tgt = base * (1 - S.targetPct / 100);
+  const need = base - tgt;
+  const gap = Math.max(0, cur - tgt);
+  const chg = base > 0 ? (cur - base) / base * 100 : null;
+
+  // month-on-month, newest last, each against the usable month before it
+  const series = months.map((m, i) => {
+    const prev = months.slice(0, i).reverse().find(x => complete(x) && usable(x));
+    const h = hoursIn(m), ph = prev != null ? hoursIn(prev) : null;
+    return {month: m, label: monthLabel(m), hours: h, count: countIn(m),
+      partial: !complete(m), usable: usable(m), prev: prev || '',
+      chg: ph > 0 ? (h - ph) / ph * 100 : null};
+  });
+
+  return {
+    months, axis: ax.months, partial: ax.partial, curMonth, curPartial: !complete(curMonth), autoMonth: auto,
+    cur, curCount: countIn(curMonth), mode, manual,
+    modeLabel: (CMP_MODES.find(x => x[0] === mode) || CMP_MODES[0])[1],
+    win, winLabel: manual ? 'ตัวเลขที่กำหนดเอง' : monthsLabel(win),
+    baseName: manual ? 'ฐานที่กำหนดเอง'
+      : !win.length ? 'ฐาน (ยังไม่มีเดือนก่อนหน้า)'
+      : mode === 'prev' ? 'เดือนก่อน (' + monthLabel(win[0]) + ')'
+      : mode === 'all' ? 'เฉลี่ยทุกเดือนก่อนหน้า (' + monthsLabel(win) + ')'
+      : 'เฉลี่ย 3 เดือนก่อน (' + monthsLabel(win) + ')',
+    rateMonths, rateLabel: monthsLabel(rateMonths),
+    base, tgt, need, gap, chg, delta: cur - base, onTarget: cur <= tgt,
+    progress: need > 0 ? Math.min(100, Math.max(0, (base - cur) / need * 100)) : 0,
+    series, usable, complete, hoursIn,
+  };
+}
+
+/** A group's downtime per month now: the last three complete months up to the
+    selected month. Replaces an all-time average, which a group that was bad a
+    year ago and fixed since would still carry today. */
+function rateOf(recs){
+  const ms = PER ? PER.rateMonths : [];
+  if(!ms.length) return 0;
+  const set = new Set(ms);
+  return sum(recs.filter(r => r.hours != null && set.has(r.month)), r => r.hours) / ms.length;
+}
+
+/** "+24.8%" / "−12.0%", or a dash when there is nothing to compare with. */
+const signPct = v => v == null ? '—' : (v > 0 ? '+' : v < 0 ? '−' : '±') + n1(Math.abs(v)) + '%';
+/** Less downtime is good: a fall is green, a rise is red, a wobble is neutral. */
+const chgTone = (v, band) => v == null ? '' : v <= -(band || 3) ? 'good' : v >= (band || 3) ? 'crit' : '';
+
+/** The last few months side by side, each against the month before it — the
+    question "did last month get better" answered without reading a chart. */
+function momStrip(p, n){
+  const rows = p.series.slice(-(n || 6));
+  if(!rows.length) return '';
+  return `<div class="momstrip" style="display:grid;grid-template-columns:repeat(${rows.length},minmax(0,1fr));
+      gap:6px;margin-top:12px">
+    ${rows.map(m => {
+      const t = m.partial || !m.usable ? '' : chgTone(m.chg);
+      const on = m.month === p.curMonth;
+      return `<div style="background:var(--surface2);border-radius:10px;padding:7px 9px;
+          border:1px solid ${on ? 'var(--brand)' : 'transparent'}"
+          title="${esc(m.label)}: ${esc(hr(m.hours))} · ${n0(m.count)} ใบงาน${m.prev ? ' · เทียบ ' + esc(monthLabel(m.prev)) : ''}">
+        <p style="font-size:var(--t-2xs);color:var(--muted);white-space:nowrap">${esc(m.label)}${on ? ' ●' : ''}</p>
+        <b class="tab" style="font-size:var(--t-sm)">${n0(m.hours)}</b>
+        <p class="tab" style="font-size:var(--t-2xs);font-weight:700;white-space:nowrap;
+          color:${t === 'good' ? 'var(--good-ink)' : t === 'crit' ? 'var(--crit-ink)' : 'var(--muted)'}">${
+          m.partial ? 'ยังไม่จบเดือน' : !m.usable ? 'ข้อมูลไม่ครบ' : signPct(m.chg)}</p>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+/** The standing note under every headline number: which month, against what,
+    and which month was left out and why. */
+function periodNote(p){
+  const bits = [];
+  if(p.curPartial)
+    bits.push(`<b style="color:var(--warn-ink)">⚠ ${esc(monthLabel(p.curMonth))} ยังไม่จบเดือน</b> — ตัวเลขยังไม่ครบ อย่าอ่านว่าลดลง`);
+  else if(p.partial && p.months.includes(p.partial.month))
+    bits.push(`${esc(monthLabel(p.partial.month))} ยังไม่จบเดือน (ข้อมูลถึง ${esc(fmtDate(p.partial.lastDate))}) จึง<b>ยังไม่นำมาเทียบ</b>`);
+  const skipped = p.months.filter(m => m < p.curMonth && p.complete(m) && !p.usable(m));
+  if(skipped.length && p.mode !== 'manual')
+    bits.push(`ข้าม ${skipped.length} เดือนที่กรอกระยะเวลาไม่ถึง 60%`);
+  return bits.join(' · ');
+}
+
 /* ---------- 🔁 REPEAT FAILURE ---------- */
 P.repeat = c => {
   const {rs, o} = c;
@@ -3915,7 +4154,7 @@ P.saving = c => {
   </div>
 
   <div class="grid g5" style="margin-bottom:14px">
-    ${kpiCard({label:'Baseline', raw:base, dp:1, unit:'ชม./เดือน', sub:'ค่าเฉลี่ยจากข้อมูลจริง', tone:'warn', d:1})}
+    ${kpiCard({label:'Baseline', raw:base, dp:1, unit:'ชม./เดือน', sub:esc(c.per.baseName), tone:'warn', d:1})}
     ${kpiCard({label:'เป้าหมาย', raw:tgt, dp:1, unit:'ชม./เดือน', sub:`ลด ${S.targetPct}%`, tone:'good', d:2})}
     ${kpiCard({label:'ต้องลดให้ได้', raw:need, dp:1, unit:'ชม./เดือน', sub:'Target Saving', tone:'crit', d:3})}
     ${kpiCard({label:'แผนนี้ลดได้', raw:planned, dp:1, unit:'ชม./เดือน',
@@ -3950,11 +4189,11 @@ P.saving = c => {
   ${bare('จำลองรายปัญหา',
     `<div class="bd">
       <div class="simrow" style="font-weight:700;color:var(--muted);font-size:12px;letter-spacing:.08em;text-transform:uppercase">
-        <span>ระบบ / ชุดอุปกรณ์</span><span style="text-align:right">ตอนนี้ (ชม./เดือน)</span>
+        <span>ระบบ / ชุดอุปกรณ์</span><span style="text-align:right" title="เฉลี่ย 3 เดือนล่าสุด: ${esc(c.per.rateLabel)}">ตอนนี้ (ชม./เดือน)</span>
         <span>ตั้งเป้าลด</span><span style="text-align:right">ลดได้ (ชม./เดือน)</span></div>
       ${rows.map(r => {
         const cut = S.cuts[r.key] != null ? S.cuts[r.key] : 0;
-        const pm = r.hours / Math.max(1, o.months);
+        const pm = rateOf(r.recs);
         return `<div class="simrow">
           <span style="font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
             title="${esc(r.key)}">${esc(r.key)}</span>
@@ -4101,12 +4340,16 @@ P.quality = c => {
 
   <section class="card" style="margin-top:14px">
     <div class="hd"><div><h3>ไฟล์ที่โหลด &amp; คอลัมน์ที่ใช้ไม่ได้</h3>
-      <p>คอลัมน์ที่ระบบจับคู่ไม่ได้จะไม่ถูกนำมาคำนวณเลย</p></div></div>
+      <p>คอลัมน์ที่ระบบจับคู่ไม่ได้จะไม่ถูกนำมาคำนวณเลย · คอลัมน์ของช่างอ่านได้จากหัวคอลัมน์ชื่อ
+        <b>อาการ</b> / <b>สาเหตุ</b> / <b>วิธีแก้ไข</b> (หรือ อาการเสีย, สาเหตุที่เสีย, การแก้ไขของช่าง)</p></div></div>
     <div class="bd">
       ${S.sources.filter(s => s.kind !== ROSTER_KIND)
         .map(s => `<p style="font-size:13px;color:var(--muted);line-height:1.8;margin-bottom:9px">
         <b style="color:var(--ink)">${esc(s.name)}</b> — ${n0(s.rows)} แถว<br>
         ${s.missing.length ? `<span style="color:var(--crit-ink)">ไม่พบคอลัมน์สำคัญ: ${esc(s.missing.join(', '))}</span><br>` : ''}
+        🔧 คอลัมน์ของช่าง: ${['อาการ', 'สาเหตุ', 'วิธีแก้ไข'].map((l, i) => (s.techCols || [])[i]
+          ? `<b style="color:var(--good-ink)">✓ ${l}</b> <span style="font-size:12px">(“${esc((s.techCols || [])[i])}”)</span>`
+          : `<span>✗ ${l}</span>`).join(' · ')}<br>
         ${s.unmapped.length ? `ไม่ได้ใช้ ${s.unmapped.length} คอลัมน์: ${esc(s.unmapped.slice(0, 12).join(', '))}${s.unmapped.length > 12 ? ' …' : ''}`
           : 'ใช้ครบทุกคอลัมน์ที่รู้จัก'}</p>`).join('')}
     </div>
@@ -4125,15 +4368,17 @@ P.quality = c => {
 
 /* ---------- 📑 EXECUTIVE REPORT ---------- */
 P.exec = c => {
-  const {o, base, tgt, need, byHours, br, rs, planned} = c;
-  const gap = Math.max(0, o.perMonth - tgt);
+  const {o, per, base, tgt, need, byHours, br, rs, planned} = c;
+  const {cur, gap, onTarget, chg} = per;
   const top3 = byHours.slice(0, 3);
-  const onTarget = o.perMonth <= tgt;
+  const curL = monthLabel(per.curMonth);
   const sentence =
-    `ปัจจุบัน Downtime เฉลี่ย <b>${n1(o.perMonth)} ชั่วโมง/เดือน</b> ` +
+    `Downtime เดือน ${esc(curL)} อยู่ที่ <b>${n1(cur)} ชั่วโมง</b>` +
+    (chg == null ? ' ' : ` ${chg <= 0 ? '<b>ลดลง</b>' : '<b>เพิ่มขึ้น</b>'} ${signPct(chg)} ` +
+      `เทียบกับ${esc(per.baseName)} (${n1(base)} ชั่วโมง) — `) +
     (onTarget
-      ? `<b>ต่ำกว่า</b>เป้าหมาย ${n1(tgt)} ชั่วโมง/เดือนอยู่ <b>${n1(tgt - o.perMonth)} ชั่วโมง</b>`
-      : `สูงกว่าเป้าหมาย ${n1(tgt)} ชั่วโมง/เดือนอยู่ <b>${n1(gap)} ชั่วโมง</b>`) +
+      ? `<b>ต่ำกว่า</b>เป้าหมาย ${n1(tgt)} ชั่วโมงอยู่ <b>${n1(tgt - cur)} ชั่วโมง</b>`
+      : `สูงกว่าเป้าหมาย ${n1(tgt)} ชั่วโมงอยู่ <b>${n1(gap)} ชั่วโมง</b>`) +
     (top3.length ? ` โดยปัญหาหลักมาจาก <b>${top3.map(t => esc(t.key)).join('</b>, <b>')}</b>` +
       ` ซึ่งรวมกันคิดเป็น <b>${pc(sum(top3, t => t.share), 0)}</b> ของเวลาที่เครื่องหยุดทั้งหมด` : '') +
     (rs.pairs ? ` และ <b>${pc(rs.hoursShare, 0)}</b> ของ Downtime มาจากปัญหาที่<b>เคยซ่อมไปแล้วแต่กลับมาซ้ำ</b>` : '') + '.';
@@ -4149,8 +4394,10 @@ P.exec = c => {
   ${editBanner(c)}
 
   <div class="grid g5" style="margin-bottom:14px">
-    ${kpiCard({label:'01 · Downtime ตอนนี้', raw:o.perMonth, dp:1, unit:'ชม./เดือน', tone:'crit', d:1})}
-    ${kpiCard({label:'02 · เป้าหมาย', raw:tgt, dp:1, unit:'ชม./เดือน', sub:`ลด ${S.targetPct}%`, tone:'good', d:2})}
+    ${kpiCard({label:'01 · Downtime เดือน ' + curL, raw:cur, dp:1, unit:'ชม.',
+      sub:`${signPct(chg)} เทียบกับ${esc(per.baseName)}${per.curPartial ? ' · ยังไม่จบเดือน' : ''}`,
+      tone: chgTone(chg) || 'crit', d:1})}
+    ${kpiCard({label:'02 · เป้าหมาย', raw:tgt, dp:1, unit:'ชม./เดือน', sub:`ลด ${S.targetPct}% จากฐาน ${n1(base)}`, tone:'good', d:2})}
     ${kpiCard({label:'03 · ส่วนต่าง (Gap)', raw:gap, dp:1, unit:'ชม./เดือน',
       sub:onTarget ? 'ถึงเป้าแล้ว' : 'ต้องลดให้ได้', tone:onTarget ? 'good' : 'crit', d:3})}
     ${kpiCard({label:'04 · ปัญหาอันดับ 1', value: top3[0] ? clip(top3[0].key, 15) : '—',
@@ -4197,8 +4444,8 @@ P.exec = c => {
 
   ${bare('แนวโน้มรายเดือน', `<div class="bd">
     ${legend([{label:'Downtime จริง', color:'var(--s1)'},{label:'เป้าหมาย ' + n0(tgt) + ' ชม.', color:'var(--good)', dash:1}])}
-    <div data-ch="trend"></div></div>`,
-    'จุดกลวงสีแดง = เดือนที่ข้อมูลไม่ครบ ห้ามอ่านว่าผลงานดีขึ้น')}
+    <div data-ch="trend"></div>${momStrip(per, 6)}</div>`,
+    'จุดกลวงสีแดง = เดือนที่ข้อมูลไม่ครบ ห้ามอ่านว่าผลงานดีขึ้น · แถวล่าง = แต่ละเดือนเทียบกับเดือนก่อน')}
 
   <div class="card" style="margin-top:14px;padding:16px 18px">
     <p class="eyebrow" style="margin-bottom:9px">หมายเหตุการอ่านตัวเลข</p>
@@ -4209,6 +4456,8 @@ P.exec = c => {
         ? 'นับเฉพาะงานที่ระบุว่า “เครื่องหยุด” — ตรงกับความหมายของ Production Downtime'
         : '<b style="color:var(--warn-ink)">กำลังนับทุกใบงาน</b> รวมงานที่เครื่องไม่ได้หยุด ตัวเลขจะสูงกว่า Production Downtime จริง'}</li>
       <li>เดือนที่ข้อมูลไม่ครบถูกทำเครื่องหมายไว้ และไม่ถูกนำไปสรุปว่าผลงานดีขึ้น</li>
+      <li>“ตอนนี้” = เดือน ${esc(curL)} · % และเป้าหมายคิดจาก${esc(per.baseName)}
+        — เปลี่ยนได้ที่แถบด้านบน (เดือน / เทียบ)${periodNote(per) ? ' · ' + periodNote(per) : ''}</li>
     </ul>
   </div>`;
 };
@@ -4636,25 +4885,27 @@ function trendWindow(recs, c){
   };
 }
 
+/* A job can be pinned to one brand. QW and WAG are two fleets — 12 hours with
+   wash staff on site against 24 hours with nobody — so the same equipment
+   fault is a different job with a different fix in each. Left unset, the job
+   covers both, which is right for something genuinely fleet-wide. */
+const actionScopeFn = sc => r =>
+  (sc.kind === 'branch' ? r.branchCode === sc.key : r.category === sc.key) &&
+  (!sc.branch || r.branchCode === sc.branch) &&
+  (!sc.brand || r.brand === sc.brand);
+
 /** The live evidence behind one action — recomputed every render from the
     records currently in view, never stored. */
 function actionCase(a, c){
   const sc = a.scope;
   if(!sc) return null;
-  /* A job can be pinned to one brand. QW and WAG are two fleets — 12 hours with
-     wash staff on site against 24 hours with nobody — so the same equipment
-     fault is a different job with a different fix in each. Left unset, the job
-     covers both, which is right for something genuinely fleet-wide. */
-  const inScope = r =>
-    (sc.kind === 'branch' ? r.branchCode === sc.key : r.category === sc.key) &&
-    (!sc.branch || r.branchCode === sc.branch) &&
-    (!sc.brand || r.brand === sc.brand);
-  const recs = c.recs.filter(inScope);
+  const recs = c.recs.filter(actionScopeFn(sc));
   if(!recs.length) return {recs: [], empty: true};
   const withH = recs.filter(r => r.hours != null);
   const hours = sum(withH, r => r.hours);
   const months = uniq(recs.map(r => r.month).filter(Boolean)).sort();
-  const perMonth = hours / Math.max(1, c.o.months);
+  // the last three complete months (10b), not an all-time average
+  const perMonth = rateOf(recs);
   const other = pareto(groupBy(recs, r => sc.kind === 'branch' ? r.category : r.branchCode), 'hours');
   const symptoms = pareto(groupBy(recs, r => (r.detail || '(ไม่ระบุอาการ)').trim()), 'hours');
   const rep = repeats(recs, 2);
@@ -4677,6 +4928,7 @@ function actionCase(a, c){
     }),
     last: months[months.length - 1] || '',
     share: c.o.hours > 0 ? hours / c.o.hours * 100 : 0,
+    tech: techNotes(recs),
   };
 }
 
@@ -4687,13 +4939,115 @@ function actionExpected(a, ac){
   if(Number(a.cutPct) > 0 && base > 0) return base * Number(a.cutPct) / 100;
   return Number(a.expected) || 0;
 }
-/** Measured saving. Counts only when the job is closed AND both Before and
-    After were actually entered — an unmeasured job saves nothing on paper. */
-function actionActual(a){
+/* ==========================================================================
+   MEASURING A JOB AGAINST THE DATA
+   A plan is only worth the change it makes in the tickets. So each job is
+   measured the way an engineer would: the average downtime of its own case in
+   the full months BEFORE work started, against the full months AFTER — once
+   from the start date (is it moving?) and once from the due date (did it hold
+   after the job was meant to be done?). It is recomputed from the live data on
+   every render, so adding next month's file updates every job's result without
+   anyone typing a number.
+   Month rules, all of them so a part-month can never pass for an improvement:
+     - the month a date falls in is a transition month and belongs to neither
+       side, unless the date is the 1st
+     - a month still in progress, or one whose durations were mostly never
+       filled in, is left out
+   ========================================================================== */
+/** "1/10/2026", "01/10/2569", "2026-10-01" -> "2026-10-01"; anything else -> '' */
+function toISODate(v){
+  const s = String(v || '').trim();
+  const iso = (y, m, d) => {
+    if(y < 100) y += 2000;
+    if(y > 2400) y -= 543;                      // พ.ศ.
+    const t = new Date(Date.UTC(y, m - 1, d));
+    return t.getUTCMonth() === m - 1 && t.getUTCDate() === d ? t.toISOString().slice(0, 10) : '';
+  };
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  if(m) return iso(+m[1], +m[2], +m[3]);
+  m = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/.exec(s);
+  if(m) return iso(+m[3], +m[2], +m[1]);
+  return '';
+}
+const firstFullMonthFrom = d => Number(d.slice(8, 10)) === 1 ? d.slice(0, 7) : addMonth(d.slice(0, 7), 1);
+const lastFullMonthBefore = d => addMonth(d.slice(0, 7), -1);
+
+function actionMeasure(a, c){
+  const sc = a.scope;
+  if(!sc) return {state: 'noscope'};
+  const start = toISODate(a.start), due = toISODate(a.due);
+  if(!start && !due) return {state: 'nodate'};
+  const per = c.per;
+  const recs = c.measureRecs.filter(actionScopeFn(sc));
+  const own = new Map(trend(recs).map(m => [m.month, m]));
+  const h = m => (own.get(m) || {hours: 0}).hours;
+  const ok = m => per.complete(m) && per.usable(m);
+  const avg = ms => ms.length ? sum(ms.map(h)) / ms.length : 0;
+
+  const anchor = start || due;
+  const bEnd = lastFullMonthBefore(anchor);
+  const before = per.axis.filter(m => m <= bEnd && ok(m)).slice(-3);
+  const aStart = start ? firstFullMonthFrom(start) : '';
+  const aDue = due ? firstFullMonthFrom(due) : '';
+  const afterStart = aStart ? per.axis.filter(m => m >= aStart && ok(m)) : [];
+  const afterDue = aDue ? per.axis.filter(m => m >= aDue && ok(m)) : [];
+  const beforeAvg = avg(before);
+  const chgOf = ms => ms.length && beforeAvg > 0 ? (avg(ms) - beforeAvg) / beforeAvg * 100
+    : ms.length && beforeAvg === 0 ? (avg(ms) > 0 ? 100 : 0) : null;
+
+  // judge on the stricter window once it exists
+  const basis = afterDue.length ? 'due' : afterStart.length ? 'start' : '';
+  const after = basis === 'due' ? afterDue : afterStart;
+  const firstAfter = aDue && (!aStart || aDue < aStart) ? aDue : (aStart || aDue);
+
+  // the chart: three months before the anchor through the newest month there is
+  const from = before.length ? before[0] : addMonth(bEnd, -2);
+  const series = per.axis.filter(m => m >= from).slice(-12).map(m => ({
+    month: m, label: monthLabel(m), hours: h(m), count: (own.get(m) || {count: 0}).count,
+    partial: !per.complete(m), usable: per.usable(m),
+    phase: m <= bEnd ? 'before' : (aDue ? m >= aDue : aStart && m >= aStart) ? 'after' : 'during',
+  }));
+
+  return {
+    state: !before.length ? 'nobefore' : after.length ? 'ok' : 'wait',
+    start, due, before, beforeAvg,
+    afterStart, afterStartAvg: avg(afterStart), chgStart: chgOf(afterStart),
+    afterDue, afterDueAvg: avg(afterDue), chgDue: chgOf(afterDue),
+    basis, after, afterAvg: avg(after), chg: chgOf(after),
+    saved: after.length ? Math.max(0, beforeAvg - avg(after)) : 0,
+    waitFor: firstAfter, series,
+  };
+}
+
+/** The verdict as a chip: what happened, over how many months, against what. */
+function measureChip(m){
+  if(!m || m.state === 'noscope') return '';
+  if(m.state === 'nodate')
+    return `<span class="chip" title="ใส่วันที่เริ่มทำ แล้วระบบจะเทียบก่อน/หลังให้เองจากข้อมูล">📏 ยังไม่ได้ใส่วันที่เริ่ม</span>`;
+  if(m.state === 'nobefore')
+    return `<span class="chip" title="ไม่มีเดือนที่ข้อมูลครบก่อนวันที่เริ่ม จึงไม่มีอะไรให้เทียบ">📏 ไม่มีข้อมูลก่อนเริ่มให้เทียบ</span>`;
+  if(m.state === 'wait')
+    return `<span class="chip info" title="เทียบได้เมื่อข้อมูลเดือน ${esc(monthLabel(m.waitFor))} ครบทั้งเดือนแล้ว">⏳ รอผลเดือน ${esc(monthLabel(m.waitFor))}</span>`;
+  if(m.beforeAvg === 0 && m.afterAvg === 0)
+    return `<span class="chip" title="เคสนี้ไม่มีชั่วโมงเครื่องหยุดทั้งในเดือนก่อนและหลัง (${esc(monthsLabel(m.before))} / ${esc(monthsLabel(m.after))})">— ไม่มีชั่วโมงหยุดทั้งก่อน/หลัง</span>`;
+  const t = m.chg <= -10 ? 'good' : m.chg >= 10 ? 'crit' : '';
+  const word = t === 'good' ? '▼ ลดลง' : t === 'crit' ? '▲ เพิ่มขึ้น' : '≈ ทรงตัว';
+  const tip = `ก่อนเริ่ม ${n1(m.beforeAvg)} ชม./เดือน (${monthsLabel(m.before)}) → ` +
+    `หลัง${m.basis === 'due' ? 'ครบกำหนด' : 'เริ่มทำ'} ${n1(m.afterAvg)} ชม./เดือน (${monthsLabel(m.after)})` +
+    (m.after.length < 2 ? ' — มีแค่ 1 เดือน ยังเร็วไปที่จะสรุป' : '');
+  return `<span class="chip ${t}" title="${esc(tip)}">${word} ${t ? signPct(m.chg).replace(/^[+−±]/, '') : signPct(m.chg)}
+    หลัง${m.basis === 'due' ? 'ครบกำหนด' : 'เริ่มทำ'} · ${m.after.length} ด.${m.after.length < 2 ? ' ⚠' : ''}</span>`;
+}
+
+/** Measured saving. A hand-entered Before/After on a closed job is the team's
+    own verified number and wins; otherwise it is what the data itself shows
+    once a full month after the job exists. Never an estimate. */
+function actionActual(a, m){
   const before = Number(a.before) || 0, after = Number(a.after) || 0;
-  if(a.status !== 'done') return 0;
-  if(before > 0) return Math.max(0, before - after);
-  return Number(a.actual) || 0;
+  if(a.status === 'done' && before > 0) return Math.max(0, before - after);
+  if(m && m.state === 'ok') return m.saved;
+  if(a.status === 'done') return Number(a.actual) || 0;
+  return 0;
 }
 const actionVerified = a => a.status === 'done' && (Number(a.before) || 0) > 0;
 
@@ -4702,11 +5056,13 @@ P.action = c => {
   const acts = S.actions;
   const cases = acts.map(a => actionCase(a, c));
   const exp = acts.map((a, i) => actionExpected(a, cases[i]));
-  const act = acts.map(actionActual);
+  const meas = acts.map(a => actionMeasure(a, c));
+  const act = acts.map((a, i) => actionActual(a, meas[i]));
   const byStatus = k => acts.filter(a => a.status === k);
   const expOpen = sum(acts.map((a, i) => a.status === 'done' ? 0 : exp[i]));
   const actTotal = sum(act);
-  const unverified = acts.filter(a => a.status === 'done' && !actionVerified(a)).length;
+  const measured = meas.filter(m => m.state === 'ok').length;
+  const unverified = acts.filter((a, i) => a.status === 'done' && !actionVerified(a) && meas[i].state !== 'ok').length;
   const covered = sum(acts.map((a, i) => cases[i] && !cases[i].empty ? cases[i].hours : 0));
 
   const num = (i, f, v, style) =>
@@ -4739,7 +5095,7 @@ P.action = c => {
     ${ACT_STATUS.map((s, i) => kpiCard({label: s[1], raw: byStatus(s[0]).length, unit:'งาน',
       sub: n1(sum(acts.map((a, j) => a.status === s[0] ? exp[j] : 0))) + ' ชม./เดือน', tone: s[2], d: i+1})).join('')}
     ${kpiCard({label:'ลดได้จริงแล้ว (วัดผลแล้ว)', raw: actTotal, dp:1, unit:'ชม./เดือน',
-      sub:`จากเป้า ${n1(c.need)} ชม./เดือน`, tone:'good',
+      sub:`วัดจากข้อมูลแล้ว ${n0(measured)} งาน · เป้า ${n1(c.need)} ชม./เดือน`, tone:'good',
       pct: c.need > 0 ? Math.min(100, actTotal / c.need * 100) : 0, d:5})}
   </div>
 
@@ -4750,9 +5106,11 @@ P.action = c => {
       ${actTotal >= c.need ? 'ถึงเป้าหมายแล้ว' : `ยังขาด <b>${hr(Math.max(0, c.need - actTotal))}/เดือน</b>`}
       ${covered > 0 ? `<br><span style="opacity:.85;font-size:12.5px">แผนนี้ครอบคลุม
         <b>${hr(covered)}</b> จาก ${hr(c.o.hours)} ที่เห็นในข้อมูล (${pc(c.o.hours ? covered/c.o.hours*100 : 0, 0)})</span>` : ''}
-      ${unverified ? `<br><span style="color:var(--warn-ink);font-size:12.5px">⚠ มี ${unverified} งานที่ปิดแล้วแต่ยัง<b>ไม่ได้กรอก Before/After</b>
-        — ยังนับเป็นผลจริงไม่ได้</span>` : ''}</div>
+      ${unverified ? `<br><span style="color:var(--warn-ink);font-size:12.5px">⚠ มี ${unverified} งานที่ปิดแล้วแต่ยัง<b>ไม่มีผลวัด</b>
+        (ยังไม่มีเดือนเต็มหลังเริ่มทำ และไม่ได้กรอก Before/After) — ยังนับเป็นผลจริงไม่ได้</span>` : ''}</div>
   </div>
+
+  ${acts.some(a => a.scope) ? actionResults(acts, cases, meas, c) : ''}
 
   <section class="card" style="margin-bottom:14px">
     <div class="hd"><div><h3>รายการงาน</h3>
@@ -4785,7 +5143,7 @@ P.action = c => {
         });
         const keys = [...groups.keys()].sort((x, y) =>
           (order.indexOf(x) + 1 || 9) - (order.indexOf(y) + 1 || 9));
-        const card = i => actionCard(acts[i], i, cases[i], exp[i], act[i], c, num, txt, bullets);
+        const card = i => actionCard(acts[i], i, cases[i], exp[i], act[i], c, num, txt, bullets, meas[i]);
         // one brand only: no point in a header that says the same thing twice
         if(keys.length < 2) return acts.map((a, i) => card(i)).join('');
         return keys.map(k => {
@@ -4834,7 +5192,7 @@ P.action = c => {
 };
 
 /** One action: the summary row always, the full case when opened. */
-function actionCard(a, i, ac, expected, actual, c, num, txt, bullets){
+function actionCard(a, i, ac, expected, actual, c, num, txt, bullets, ms){
   const st = statusMeta(a.status), sg = stageMeta(a.stage);
   const hasCase = ac && !ac.empty;
   const base = hasCase ? ac.perMonth : 0;
@@ -4854,7 +5212,7 @@ function actionCard(a, i, ac, expected, actual, c, num, txt, bullets){
     <b class="tab" style="font-size:17px;color:var(--${tone}-ink)">${val}</b>
     <span style="font-size:12px;color:var(--muted)"> ${unit}</span></div>`;
 
-  return `<div class="card" style="border-color:${a.open ? 'var(--line2)' : 'var(--line)'}">
+  return `<div class="card" id="act-${i}" style="border-color:${a.open ? 'var(--line2)' : 'var(--line)'};scroll-margin-top:12px">
     <div style="display:flex;align-items:flex-start;gap:11px;padding:12px 14px;cursor:pointer" data-actopen="${i}">
       <span style="font-size:14px;color:var(--muted);margin-top:2px">${a.open ? '▾' : '▸'}</span>
       <div style="flex:1;min-width:0">
@@ -4869,7 +5227,9 @@ function actionCard(a, i, ac, expected, actual, c, num, txt, bullets){
         </div>
         <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:5px;font-size:12.5px;color:var(--muted)">
           <span>👤 ${esc(a.owner || 'ยังไม่มีเจ้าของ')}</span>
-          <span>📅 ${esc(a.due || 'ยังไม่กำหนด')}</span>
+          <span title="วันที่เริ่มทำ">▶ ${toISODate(a.start) ? esc(fmtDate(toISODate(a.start))) : 'ยังไม่ใส่วันเริ่ม'}</span>
+          <span title="กำหนดเสร็จ">📅 ${toISODate(a.due) ? esc(fmtDate(toISODate(a.due))) : esc(a.due || 'ยังไม่กำหนด')}</span>
+          ${measureChip(ms)}
           ${dirTxt}
         </div>
       </div>
@@ -4931,16 +5291,20 @@ function actionCard(a, i, ac, expected, actual, c, num, txt, bullets){
               ${n0(Math.min(...ac.rep.map(r => r.interval || 999)))} วัน ที่ ${esc(ac.rep[0].branchName || ac.rep[0].branch)}</p>` : ''}
           </div>
         </div>
+        ${ac.tech.has ? `<div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)">
+          <p style="font-size:12px;color:var(--muted);margin-bottom:6px">🔧 ที่ช่างบันทึกไว้ในใบงาน — ใช้เป็นหลักฐานตอนเขียนสาเหตุและวิธีแก้ในข้อ 2</p>
+          ${techNotesHTML(ac.tech, 5)}</div>` : ''}
         <div style="margin-top:10px">
           <p style="font-size:12px;color:var(--muted);margin-bottom:5px">
             ใบงานจริง ${n0(ac.count)} ใบ — ${ac.count > 6 ? 'แสดง 6 ใบที่หยุดนานที่สุด' : 'ทั้งหมด'}</p>
           <div class="scrollx"><table class="tbl" style="font-size:12.5px">
             <thead><tr><th style="width:96px">วันที่</th><th style="width:130px">สาขา</th>
-              <th>อาการที่แจ้ง</th><th style="width:72px;text-align:right">ชม.</th>
+              <th>อาการที่แจ้ง</th>${ac.tech.has ? '<th>สาเหตุ → วิธีแก้ (ช่าง)</th>' : ''}<th style="width:72px;text-align:right">ชม.</th>
               <th style="width:120px">ทีมช่าง</th></tr></thead>
             <tbody>${[...ac.recs].sort((x, y) => (y.hours || 0) - (x.hours || 0)).slice(0, 6).map(r => `
               <tr><td>${esc(fmtDate(r.date))}</td><td>${esc(clip(r.branchName || r.branchCode, 18))}</td>
-                <td style="color:var(--ink2)">${esc(clip(r.detail || '—', 56))}</td>
+                <td style="color:var(--ink2)">${esc(clip(r.symptom || r.detail || '—', ac.tech.has ? 36 : 56))}</td>
+                ${ac.tech.has ? `<td style="color:var(--ink2)">${esc(clip([r.rootCause, r.techFix].map(techText).filter(Boolean).join(' → ') || '—', 44))}</td>` : ''}
                 <td class="num">${r.hours != null ? n1(r.hours) : '—'}</td>
                 <td>${esc(clip(r.team, 16))}</td></tr>`).join('')}</tbody></table></div>
           <button class="btn sm ghost" style="margin-top:7px"
@@ -4990,11 +5354,17 @@ function actionCard(a, i, ac, expected, actual, c, num, txt, bullets){
               QW เปิด 12 ชม. มีพนักงานหน้าร้าน · WAG เปิด 24 ชม. ไม่มีคน — วิธีแก้มักไม่เหมือนกัน</p>` : ''}` : ''}
             <p style="font-size:12px;color:var(--muted);margin:9px 0 4px">อะไหล่ / ของที่ต้องใช้</p>
             ${bullets(i, 'parts', a.parts, 'ขึ้นบรรทัดใหม่ = 1 รายการ · เช่น ขั้วกันน้ำ IP67 ×20')}
-            <div style="display:flex;gap:12px;margin-top:9px">
+            <div class="actmeta" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px 12px;margin-top:9px">
               <div style="flex:1"><p style="font-size:12px;color:var(--muted);margin-bottom:4px">ผู้รับผิดชอบ</p>
                 ${txt(i, 'owner', a.owner, 'ชื่อ/ทีม')}</div>
+              <div style="flex:1"><p style="font-size:12px;color:var(--muted);margin-bottom:4px">วันที่เริ่มทำ</p>
+                <input class="inp" type="date" data-actdate="${i}" data-fld="start" style="height:30px"
+                  value="${esc(toISODate(a.start))}" title="ใช้แบ่งช่วง ก่อน / หลัง เพื่อวัดผลจากข้อมูล">
+                <p style="font-size:11px;color:var(--muted);margin-top:2px">${toISODate(a.start) ? esc(fmtDate(toISODate(a.start))) : 'ยังไม่ใส่ — ใส่แล้วระบบวัดผลให้'}</p></div>
               <div style="flex:1"><p style="font-size:12px;color:var(--muted);margin-bottom:4px">กำหนดเสร็จ</p>
-                ${txt(i, 'due', a.due, 'ว/ด/ป')}</div>
+                <input class="inp" type="date" data-actdate="${i}" data-fld="due" style="height:30px"
+                  value="${esc(toISODate(a.due))}" title="${a.due && !toISODate(a.due) ? 'ค่าเดิม “' + esc(a.due) + '” อ่านเป็นวันที่ไม่ได้ — เลือกใหม่' : 'ใช้วัดผลหลังครบกำหนด'}">
+                <p style="font-size:11px;color:${a.due && !toISODate(a.due) ? 'var(--warn-ink)' : 'var(--muted)'};margin-top:2px">${toISODate(a.due) ? esc(fmtDate(toISODate(a.due))) : a.due ? 'ค่าเดิม “' + esc(a.due) + '” อ่านไม่ได้' : 'ยังไม่กำหนด'}</p></div>
               <div style="flex:1"><p style="font-size:12px;color:var(--muted);margin-bottom:4px">งบ (บาท)</p>
                 ${num(i, 'cost', a.cost || 0)}</div>
             </div>
@@ -5010,7 +5380,7 @@ function actionCard(a, i, ac, expected, actual, c, num, txt, bullets){
             <b class="tab" style="font-size:18px;color:var(--crit-ink)">${n1(base)}</b>
             <span style="font-size:12px;color:var(--muted)"> ชม./เดือน</span>
             <p style="font-size:11.5px;color:var(--muted);margin-top:2px">
-              ${hasCase ? `${hr(ac.hours)} ÷ ${n0(c.o.months)} เดือน` : 'ไม่มีเคสผูกไว้'}</p>
+              ${hasCase ? `เฉลี่ย 3 เดือนล่าสุด · ${esc(c.per.rateLabel)}` : 'ไม่มีเคสผูกไว้'}</p>
           </div>
           <div style="background:var(--surface2);border-radius:10px;padding:10px 12px">
             <p class="eyebrow" style="font-size:11.5px">ตั้งใจลดลง</p>
@@ -5047,12 +5417,103 @@ function actionCard(a, i, ac, expected, actual, c, num, txt, bullets){
           (${n1(c.need)} ชม./เดือน)</p>` : ''}
       </div>
 
+      ${a.scope ? `<div>
+        <p class="eyebrow" style="margin-bottom:7px">4 · ผลลัพธ์ — วัดจากข้อมูลจริงอัตโนมัติ</p>
+        ${measurePanel(ms)}
+      </div>` : ''}
+
       <div>
         <p class="eyebrow" style="margin-bottom:5px">บันทึกเพิ่มเติม</p>
         ${bullets(i, 'note', a.note, 'ขึ้นบรรทัดใหม่ = 1 ข้อ · ผลการตรวจสอบ อุปสรรค สิ่งที่ต้องตามต่อ')}
       </div>
     </div>` : ''}
   </div>`;
+}
+
+/** Inside a card: the three numbers and the months behind them, as bars. */
+function measurePanel(m){
+  if(!m || m.state === 'noscope') return '';
+  if(m.state === 'nodate') return `<div class="banner info" style="margin:0"><span class="i">📏</span>
+    <div>ใส่ <b>วันที่เริ่มทำ</b> (และ <b>กำหนดเสร็จ</b>) ในข้อ 2 — ระบบจะเอาชั่วโมงของเคสนี้
+      ในเดือนก่อนเริ่ม มาเทียบกับเดือนหลังเริ่ม และหลังครบกำหนดให้เอง
+      และอัปเดตทุกครั้งที่เพิ่มไฟล์เดือนใหม่ ไม่ต้องกรอกตัวเลขเอง</div></div>`;
+  const mini = (label, avg, ms, chg, note) => {
+    const t = chg == null ? '' : chg <= -10 ? 'good' : chg >= 10 ? 'crit' : '';
+    return `<div style="background:var(--surface2);border-radius:10px;padding:10px 12px">
+      <p class="eyebrow" style="font-size:11.5px">${label}</p>
+      ${ms.length ? `<b class="tab" style="font-size:18px">${n1(avg)}</b>
+        <span style="font-size:12px;color:var(--muted)"> ชม./เดือน</span>
+        ${chg != null ? `<b class="tab" style="margin-left:6px;font-size:13px;color:${t === 'good'
+          ? 'var(--good-ink)' : t === 'crit' ? 'var(--crit-ink)' : 'var(--muted)'}">${signPct(chg)}</b>` : ''}
+        <p style="font-size:11.5px;color:var(--muted);margin-top:2px">${esc(monthsLabel(ms))}${ms.length === 1 && chg != null ? ' · ยังเร็วไปที่จะสรุป' : ''}</p>`
+      : `<p style="font-size:12.5px;color:var(--muted);margin-top:4px">${note}</p>`}
+    </div>`;
+  };
+  const max = Math.max(1, ...m.series.map(s => s.hours));
+  const col = {before: 'var(--s1)', during: 'var(--warn)', after: 'var(--good)'};
+  return `
+    <div class="grid g3" style="gap:10px">
+      ${mini('ก่อนเริ่มทำ' + (m.start ? '' : ' (ก่อนกำหนดเสร็จ)'), m.beforeAvg, m.before, null,
+        'ไม่มีเดือนที่ข้อมูลครบก่อนวันที่นี้ — เทียบไม่ได้')}
+      ${mini('หลังเริ่มทำ', m.afterStartAvg, m.afterStart, m.before.length ? m.chgStart : null,
+        m.start ? `รอข้อมูลเดือน ${esc(monthLabel(firstFullMonthFrom(m.start)))} ให้ครบเดือน` : 'ยังไม่ได้ใส่วันที่เริ่มทำ')}
+      ${mini('หลังครบกำหนด', m.afterDueAvg, m.afterDue, m.before.length ? m.chgDue : null,
+        m.due ? `รอข้อมูลเดือน ${esc(monthLabel(firstFullMonthFrom(m.due)))} ให้ครบเดือน` : 'ยังไม่ได้ใส่กำหนดเสร็จ')}
+    </div>
+    ${m.series.length ? `<div style="margin-top:10px">
+      <div style="display:flex;align-items:flex-end;gap:5px;height:92px">
+        ${m.series.map(s => `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%"
+            title="${esc(s.label)}: ${esc(hr(s.hours))} · ${n0(s.count)} ใบงาน${s.partial ? ' · ยังไม่จบเดือน' : !s.usable ? ' · ข้อมูลไม่ครบ' : ''}">
+          <span class="tab" style="font-size:10.5px;color:var(--muted)">${n0(s.hours)}</span>
+          <i style="display:block;width:100%;max-width:34px;border-radius:4px 4px 0 0;
+            height:${Math.max(2, s.hours / max * 70)}px;background:${col[s.phase]};
+            ${s.partial || !s.usable ? 'opacity:.35;' : ''}"></i>
+        </div>`).join('')}
+      </div>
+      <div style="display:flex;gap:5px;border-top:1px solid var(--line);padding-top:3px">
+        ${m.series.map(s => `<span style="flex:1;text-align:center;font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden">${esc(s.label)}</span>`).join('')}
+      </div>
+      <p style="font-size:11.5px;color:var(--muted);margin-top:6px">
+        <i style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${col.before}"></i> ก่อนเริ่ม ·
+        <i style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${col.during}"></i> ระหว่างทำ / เดือนคาบเกี่ยว ·
+        <i style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${col.after}"></i> หลังครบกำหนด ·
+        แท่งจาง = ยังไม่จบเดือน / ข้อมูลไม่ครบ (ไม่นำมาคิด)</p>
+    </div>` : ''}`;
+}
+
+/** The answer to "did the plan work?", for every job at once, at the top of the
+    page — so nobody has to open twelve cards to find out. */
+function actionResults(acts, cases, meas, c){
+  const rows = acts.map((a, i) => ({a, i, m: meas[i], ac: cases[i]})).filter(x => x.a.scope);
+  const cell = (avg, ms, chg) => ms.length
+    ? `<b class="tab">${n1(avg)}</b>${chg != null ? ` <span class="tab" style="font-size:var(--t-2xs);font-weight:700;color:${
+        chg <= -10 ? 'var(--good-ink)' : chg >= 10 ? 'var(--crit-ink)' : 'var(--muted)'}">${signPct(chg)}</span>` : ''}
+       <div style="font-size:var(--t-2xs);color:var(--muted)">${esc(monthsLabel(ms))}</div>`
+    : '<span style="color:var(--muted)">—</span>';
+  const noDate = rows.filter(x => x.m.state === 'nodate').length;
+  return bare('📈 ผลหลังลงมือ — วัดจากข้อมูลจริง',
+    `${tableHTML(
+      [{h:'งาน'}, {h:'เริ่มทำ'}, {h:'กำหนดเสร็จ'},
+       {h:'ก่อนเริ่ม (ชม./เดือน)', num:1}, {h:'หลังเริ่มทำ', num:1}, {h:'หลังครบกำหนด', num:1}, {h:'ผล'}],
+      rows.map(({a, i, m, ac}) => {
+        const r = [
+          `<b style="font-size:var(--t-sm)">${esc(clip(a.title, 40))}</b> ${brandChip(a, ac)}`,
+          m.start ? esc(fmtDate(m.start)) : '<span style="color:var(--muted)">—</span>',
+          m.due ? esc(fmtDate(m.due)) : '<span style="color:var(--muted)">—</span>',
+          m.before ? cell(m.beforeAvg, m.before, null) : '—',
+          m.before ? cell(m.afterStartAvg, m.afterStart, m.before.length ? m.chgStart : null) : '—',
+          m.before ? cell(m.afterDueAvg, m.afterDue, m.before.length ? m.chgDue : null) : '—',
+          measureChip(m),
+        ];
+        r.__attr = ` class="clickrow" data-actopen="${i}" data-actjump="1" style="cursor:pointer"`;
+        return r;
+      }))}
+    <p style="font-size:var(--t-xs);color:var(--muted);padding:10px 16px 14px;line-height:var(--lh-body)">
+      ทุกครั้งที่เพิ่มไฟล์เดือนใหม่ ตารางนี้คำนวณใหม่เอง · เทียบเฉพาะใบงานในเคสของงานนั้น (ระบบ/สาขา/แบรนด์ที่ผูกไว้)
+      · ใช้เฉพาะเดือนที่จบแล้วและกรอกเวลาครบ · เดือนที่วันเริ่ม/วันกำหนดเสร็จตกอยู่ไม่นับทั้งสองฝั่ง
+      ${noDate ? `<br><b style="color:var(--warn-ink)">${n0(noDate)} งานยังไม่ได้ใส่วันที่</b> — กดที่แถวแล้วใส่ “วันที่เริ่มทำ” ในข้อ 2` : ''}</p>`,
+    'ก่อนเริ่ม = เฉลี่ย 3 เดือนเต็มก่อนวันที่เริ่ม · หลังเริ่มทำ / หลังครบกำหนด = ทุกเดือนเต็มหลังวันนั้น · กดแถวเพื่อเปิดงาน',
+    '', 'brk');
 }
 
 /* ==========================================================================
@@ -5282,6 +5743,46 @@ function rcFixes(sysKey, recs){
   return best || {label: 'แนวทางทั่วไป', list: RC_FIXES_GENERIC, from: 'ไม่พบชนิดอุปกรณ์ที่ตรงกัน'};
 }
 
+/* --- what the technicians wrote down: symptom, cause, fix ---------------------
+   Read from columns the team is adding to the repair form (see FIELDS: symptom,
+   rootCause, techFix). Until a file carries them this returns has:false and
+   every panel that uses it simply does not appear — nothing is guessed. */
+const TECH_FIELDS = [
+  ['symptom',   'อาการที่ช่างพบ',   'var(--s2)'],
+  ['rootCause', 'สาเหตุที่ช่างระบุ', 'var(--crit)'],
+  ['techFix',   'วิธีที่ช่างแก้',    'var(--good)'],
+];
+const techText = v => String(v || '').replace(/\s+/g, ' ').trim();
+function techNotes(recs){
+  const out = {has: false, n: recs.length};
+  for(const [f] of TECH_FIELDS){
+    const filled = recs.filter(r => techText(r[f]));
+    out[f] = {filled: filled.length, share: recs.length ? filled.length / recs.length * 100 : 0,
+      list: pareto(groupBy(filled, r => techText(r[f])), 'hours')};
+    if(filled.length) out.has = true;
+  }
+  return out;
+}
+/** Three ranked lists side by side; each shows how much of the case it covers,
+    because a cause written on 4 tickets out of 60 is a lead, not a conclusion. */
+function techNotesHTML(tn, top, stacked){
+  if(!tn || !tn.has) return '';
+  return `<div class="grid ${stacked ? '' : 'g3'}" style="gap:12px${stacked ? ';grid-template-columns:1fr' : ''}">${TECH_FIELDS.map(([f, label, color]) => {
+    const x = tn[f];
+    return `<div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:5px">${label}
+        <span class="tab" style="color:${x.share < 50 ? 'var(--warn-ink)' : 'var(--muted)'}">· กรอก ${n0(x.filled)}/${n0(tn.n)} ใบ (${pc(x.share, 0)})</span></p>
+      ${x.list.slice(0, top || 5).map(s => `
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:8px;align-items:center;padding:3px 0">
+          <span style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.key)}">${esc(s.key)}</span>
+          <span style="display:flex;align-items:center;gap:6px">
+            <span class="track" style="height:7px;flex:1"><i data-pct="${s.share}" style="background:${color}"></i></span>
+            <b class="tab" style="font-size:12px;white-space:nowrap">${n0(s.count)}× ${n0(s.hours)}h</b></span>
+        </div>`).join('') || '<p style="font-size:12.5px;color:var(--muted)">— ยังไม่มีใครกรอก —</p>'}
+    </div>`;
+  }).join('')}</div>`;
+}
+
 /** Everything the page needs to know about the selected main problem — a
     system, optionally narrowed to one branch. Every panel reads from this. */
 function rcAnalyse(sysKey, c, branch){
@@ -5305,7 +5806,8 @@ function rcAnalyse(sysKey, c, branch){
     months: uniq(recs.map(r => r.month).filter(Boolean)).sort(),
     avgEach: withH.length ? hours / withH.length : 0,
     worst: withH.length ? Math.max(...withH.map(r => r.hours)) : 0,
-    perMonth: hours / Math.max(1, c.o.months),
+    // per month now (last three complete months), not an all-time average
+    perMonth: rateOf(recs),
     share: c.o.hours > 0 ? hours / c.o.hours * 100 : 0,
     branchCount: branches.length,
     topBranch: branches[0] ? branches[0].key : '',
@@ -5318,6 +5820,7 @@ function rcAnalyse(sysKey, c, branch){
     repInterval: intervals.length ? sum(intervals) / intervals.length : 0,
     dirTail, dirHead, dir: dw.dir, dw,
   };
+  a.tech = techNotes(recs);
   a.signals = RC_SIGNALS.filter(s => { try { return s.test(a); } catch(e){ return false; } });
   a.fixes = rcFixes(sysKey, recs);
   return a;
@@ -5628,8 +6131,8 @@ P.rootcause = c => {
   <div class="grid g5" style="margin-bottom:14px">
     ${kpiCard({label:'Downtime ของปัญหานี้', raw:a.hours, dp:1, unit:'ชม.',
       sub:`${pc(a.share, 0)} ของทั้งหมด`, tone:'crit', d:1})}
-    ${kpiCard({label:'ต่อเดือน', raw:a.perMonth, dp:1, unit:'ชม./เดือน',
-      sub:`จาก ${n0(c.o.months)} เดือน`, tone:'orange', d:2})}
+    ${kpiCard({label:'ต่อเดือน (3 เดือนล่าสุด)', raw:a.perMonth, dp:1, unit:'ชม./เดือน',
+      sub:esc(c.per.rateLabel), tone:'orange', d:2})}
     ${kpiCard({label:'เกิดทั้งหมด', raw:a.count, unit:'ครั้ง',
       sub:`${n0(a.branchCount)} สาขา`, tone:'warn', d:3})}
     ${kpiCard({label:'เฉลี่ยต่อครั้ง', raw:a.avgEach, dp:1, unit:'ชม.',
@@ -5689,6 +6192,14 @@ P.rootcause = c => {
           </div>`).join('') || '<p style="font-size:13px;color:var(--muted)">— ไม่มีข้อมูล —</p>'}
       </div>`, `${n0(a.branchCount)} สาขา`)}
   </div>
+
+  ${a.tech.has ? bare('🔧 หน้างานบอกอะไร — อาการ · สาเหตุ · วิธีแก้ ที่ช่างบันทึกไว้',
+    `<div class="bd">${techNotesHTML(a.tech, 8)}
+      <p style="font-size:12px;color:var(--muted);margin-top:10px">เรียงตามชั่วโมงที่เครื่องหยุด ·
+        สาเหตุที่ช่างเขียนซ้ำกันหลายใบคือจุดเริ่มที่ดีที่สุดสำหรับ 5 Why ด้านล่าง ·
+        ช่องที่กรอกไม่ถึงครึ่งยังเป็นแค่เบาะแส ไม่ใช่ข้อสรุป</p></div>`,
+    'จากคอลัมน์ อาการ / สาเหตุ / วิธีแก้ไข ในไฟล์ใบงาน', '', 'brk') : `<p style="font-size:var(--t-xs);color:var(--muted);margin:-4px 0 14px">
+    🔧 ยังไม่มีคอลัมน์ <b>อาการ / สาเหตุ / วิธีแก้ไข</b> ของช่างในไฟล์ — เมื่อเพิ่มเข้าไปในไฟล์แล้วอัปโหลด ส่วนนี้จะแสดงเอง</p>`}
 
   <section class="card" style="margin-bottom:14px">
     <div class="hd"><div><h3>⑥ ควรสงสัยที่ไหน — จัดตามหมวด 4M1E</h3>
@@ -6732,21 +7243,23 @@ function mountCharts(root, c, forceWidth){
 
 /* ---------- left rail ---------- */
 function renderRail(){
-  const {o, tgt, need, planned} = C;
-  const gap = Math.max(0, o.perMonth - tgt);
-  const onTarget = gap <= 0;
+  const {per, tgt} = C;
+  const {gap, onTarget, chg} = per;
+  const t = chgTone(chg);
   $('railKpi').innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:baseline">
-      <span class="eyebrow">ตอนนี้</span><span class="eyebrow">เป้า</span></div>
+      <span class="eyebrow">${esc(monthLabel(per.curMonth))}</span><span class="eyebrow">เป้า</span></div>
     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:2px">
       <b class="tab" style="font-size:23px;font-weight:800;letter-spacing:-.03em;
-        color:${onTarget ? 'var(--good-ink)' : 'var(--crit-ink)'}">${n0(o.perMonth)}</b>
+        color:${onTarget ? 'var(--good-ink)' : 'var(--crit-ink)'}">${n0(per.cur)}</b>
       <b class="tab" style="font-size:15px;color:var(--muted)">${n0(tgt)}</b></div>
     <div class="track" style="height:6px;margin-top:8px">
-      <i style="width:${need > 0 ? Math.min(100, Math.max(0, (need - gap) / need * 100)) : 100}%;
+      <i style="width:${onTarget ? 100 : per.progress}%;
          background:${onTarget ? 'var(--good)' : 'var(--warn)'}"></i></div>
     <p style="font-size:12px;color:var(--muted);margin-top:6px">
-      ${onTarget ? '🎯 ถึงเป้าหมายแล้ว' : `ต้องลดอีก ${n1(gap)} ชม./เดือน`}</p>`;
+      <b class="tab" style="color:${t === 'good' ? 'var(--good-ink)' : t === 'crit' ? 'var(--crit-ink)' : 'var(--muted)'}"
+        title="เทียบกับ${esc(per.baseName)}">${signPct(chg)}</b> จากฐาน ·
+      ${onTarget ? '🎯 ถึงเป้าแล้ว' : `ต้องลดอีก ${n1(gap)} ชม.`}</p>`;
 
   const crit = C.br.filter(b => b.level === 'CRITICAL').length;
   const badges = {branch: crit || 0, repeat: C.rs.pairs ? C.rs.pairs : 0};
@@ -6803,11 +7316,24 @@ function renderTop(){
       ${S.f.stoppedOnly ? '✓ ' : ''}เฉพาะเครื่องหยุด</button>
     <button class="btn sm${S.f.repeatOnly ? ' on' : ''}" id="fRep" title="ดูเฉพาะปัญหาที่เกิดซ้ำ">
       ${S.f.repeatOnly ? '✓ ' : ''}เฉพาะที่ซ้ำ</button>
-    <span style="display:inline-flex;align-items:center;gap:4px;font-size:12.5px;color:var(--muted)">Baseline
-      <input class="inp" id="fBase" type="number" min="1" step="10" style="width:78px;height:28px"
-        value="${S.baseline != null ? S.baseline : ''}" placeholder="auto" title="ค่าตั้งต้น ปล่อยว่าง = ใช้ค่าเฉลี่ยจากข้อมูล">
-      ลด<input class="inp" id="fPct" type="number" min="1" max="90" step="1" style="width:58px;height:28px"
-        value="${S.targetPct}">%</span>
+    ${(() => {
+      /* "ตอนนี้" and what it is compared with. Picked here, in the bar, because
+         the overview, the rail, the report, the simulator and the action plan
+         all follow it. */
+      const p = C.per;
+      return `<span style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)">
+        <select class="inp" id="fCur" style="width:126px" title="เดือนที่ถือว่าเป็น “ตอนนี้”">
+          ${opt('', 'ล่าสุด · ' + monthLabel(p.autoMonth), S.curMonth)}
+          ${[...p.months].reverse().map(m => opt(m, monthLabel(m) +
+            (p.complete(m) ? '' : ' (ยังไม่จบ)'), S.curMonth)).join('')}</select>
+        เทียบ<select class="inp" id="fCmp" style="width:168px" title="ฐานที่ใช้คิด % และเป้าหมาย">
+          ${CMP_MODES.map(m => opt(m[0], m[1], p.mode)).join('')}</select>
+        ${p.mode === 'manual' ? `<input class="inp" id="fBase" type="number" min="1" step="10"
+          style="width:78px;height:28px" value="${S.baseline != null ? S.baseline : ''}"
+          placeholder="ชม." title="ฐานที่กำหนดเอง (ชม./เดือน)">` : ''}
+        ลด<input class="inp" id="fPct" type="number" min="1" max="90" step="1" style="width:58px;height:28px"
+          value="${S.targetPct}">%</span>`;
+    })()}
     ${nActive ? '<button class="btn sm ghost" id="fClear">ล้างตัวกรอง</button>' : ''}
     <span style="flex:1"></span>
     <button class="btn sm ghost" id="aTheme" title="สลับโหมดสว่าง/มืด">◐</button>
@@ -6831,6 +7357,7 @@ function openDrill(kind, key){
   const byOther = pareto(groupBy(recs, r => kind === 'branch' ? r.category : r.branchCode), 'hours');
   const symptoms = pareto(groupBy(recs, r => r.detail || '(ไม่ระบุอาการ)'), 'hours').slice(0, 8);
   const rep = repeats(recs, 2);
+  const tech = techNotes(recs);
   const title = kind === 'branch' ? 'สาขา ' + key : key;
 
   $('drill').className = 'open';
@@ -6876,6 +7403,11 @@ function openDrill(kind, key){
             </div>`).join('') || '<p style="font-size:13px;color:var(--muted)">— ไม่มีข้อมูล —</p>'}
         </div>
 
+        ${tech.has ? `<div>
+          <p class="eyebrow" style="margin-bottom:8px">🔧 ที่ช่างบันทึกไว้ — อาการ · สาเหตุ · วิธีแก้</p>
+          ${techNotesHTML(tech, 5, true)}
+        </div>` : ''}
+
         ${rep.length ? `<div class="banner crit" style="padding:11px 13px">
           <span class="i">🔁</span>
           <div style="font-size:13px">พบปัญหาเกิดซ้ำ <b>${rep.length} คู่</b> รวม <b>${hr(sum(rep, r => r.hours))}</b>
@@ -6884,11 +7416,13 @@ function openDrill(kind, key){
 
         <div>
           <p class="eyebrow" style="margin-bottom:8px">ใบงานล่าสุด</p>
-          ${tableHTML([{h:'วันที่'},{h: kind === 'branch' ? 'ระบบ' : 'สาขา'},{h:'อาการ'},{h:'ชม.', num:1}],
+          ${tableHTML([{h:'วันที่'},{h: kind === 'branch' ? 'ระบบ' : 'สาขา'},{h:'อาการ'},
+              ...(tech.has ? [{h:'สาเหตุ / วิธีแก้ (ช่าง)'}] : []), {h:'ชม.', num:1}],
             recs.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 25).map(r => [
               esc(fmtDate(r.date)),
               `<span class="st">${esc(clip(kind === 'branch' ? r.category : r.branchCode, 18))}</span>`,
-              esc(clip(r.detail || '—', 30)),
+              esc(clip(r.symptom || r.detail || '—', 30)),
+              ...(tech.has ? [esc(clip([r.rootCause, r.techFix].map(techText).filter(Boolean).join(' → ') || '—', 34))] : []),
               r.hours != null ? n1(r.hours) : '<span style="color:var(--muted)">—</span>']), {maxH: 300})}
         </div>
       </div>
@@ -7028,7 +7562,7 @@ function bindGlobalEvents(){
       const i = Number(del.dataset.actdel), a = S.actions[i];
       if(!a) return;
       // only ask when there is something to lose — an untouched card just goes
-      const written = [a.cause, a.fix, a.parts, a.note, a.owner, a.due]
+      const written = [a.cause, a.fix, a.parts, a.note, a.owner, a.due, a.start]
         .some(v => String(v || '').trim());
       if(written && !confirm('ลบงาน “' + (a.title || 'ไม่มีชื่อ') + '” ออกจากแผน?\n' +
         'รายละเอียดที่พิมพ์ไว้จะหายไปด้วย')) return;
@@ -7039,8 +7573,16 @@ function bindGlobalEvents(){
     const ao = t.closest('[data-actopen]');
     // a click that landed on a control inside the row is that control's, not the row's
     if(ao && !t.closest('button, select, input, textarea, [contenteditable], a')){
-      const a = S.actions[Number(ao.dataset.actopen)];
-      if(a){ a.open = !a.open; saveActions(); renderEditor(); }
+      const i = Number(ao.dataset.actopen), a = S.actions[i];
+      if(!a) return;
+      // a row in the results table opens its job and goes to it, never closes it
+      if(ao.dataset.actjump){
+        a.open = true; saveActions(); renderEditor();
+        const card = $('act-' + i);
+        if(card) card.scrollIntoView({behavior: 'smooth', block: 'start'});
+        return;
+      }
+      a.open = !a.open; saveActions(); renderEditor();
       return;
     }
     if(t.id === 'actExpand'){
@@ -7313,12 +7855,21 @@ function bindGlobalEvents(){
       S.f[map[t.id]] = t.value;
       render(); return;
     }
-    if(t.id === 'fBase'){ const v = Number(t.value); S.baseline = v > 0 ? v : null; render(); return; }
-    if(t.id === 'fPct'){ const v = Number(t.value); S.targetPct = (v > 0 && v < 100) ? v : 20; render(); return; }
+    if(t.id === 'fBase'){ const v = Number(t.value); S.baseline = v > 0 ? v : null; saveView(); render(); return; }
+    if(t.id === 'fPct'){ const v = Number(t.value); S.targetPct = (v > 0 && v < 100) ? v : 20; saveView(); render(); return; }
+    if(t.id === 'fCur'){ S.curMonth = t.value; render(); return; }
+    if(t.id === 'fCmp'){ S.cmpMode = t.value; saveView(); render(); return; }
     const st = t.closest('[data-actst]');
     if(st){ S.actions[Number(st.dataset.actst)].status = st.value; saveActions(); render(); return; }
     const sg = t.closest('[data-actsg]');
     if(sg){ S.actions[Number(sg.dataset.actsg)].stage = sg.value; saveActions(); render(); return; }
+    // start / due — stored as yyyy-mm-dd, which is what the measurement reads
+    const ad = t.closest('[data-actdate]');
+    if(ad){
+      const a = S.actions[Number(ad.dataset.actdate)];
+      if(a && a[ad.dataset.fld] !== ad.value){ a[ad.dataset.fld] = ad.value; saveActions(); renderEditor(); }
+      return;
+    }
     /* --- data editor: include/exclude one record --- */
     const inc = t.closest('[data-edinc]');
     if(inc){
@@ -7913,6 +8464,7 @@ function demoGrid(){
     e.preventDefault(); e.returnValue = '';
   });
 
+  loadView();
   bindGlobalEvents();
 
   /* A published copy carries the baseline encrypted, so nothing can be read
