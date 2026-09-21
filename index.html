@@ -2965,6 +2965,29 @@ function branchScores(recs, months){
 }
 const LEVEL_TONE = {CRITICAL:'crit', HIGH:'orange', MEDIUM:'warn', LOW:'good'};
 
+/** A branch with no ticket in the month being looked at still exists, and a
+    month with nothing broken is the best month a branch can have. Leaving it
+    out made the table shrink whenever a month was picked and made every
+    comparison incomplete — so the fleet is padded back to full strength with
+    honest zeroes. Brand / series / branch filters still apply: they narrow
+    which fleet is being looked at, not whether a quiet branch counts. */
+function padBranches(rows, all, f){
+  const seen = new Set(rows.map(r => r.branch));
+  const out = [...rows];
+  for(const r of all){
+    const code = r.branchCode;
+    if(!code || seen.has(code) || code === '(ไม่ระบุสาขา)') continue;
+    if(f.brand && r.brand !== f.brand) continue;
+    if(f.series && r.series !== f.series) continue;
+    if(f.branch && code !== f.branch) continue;
+    seen.add(code);
+    out.push({branch: code, name: r.branchName || code, brand: r.brand,
+      hours: 0, count: 0, perMonth: 0, avgHours: 0, repeatPairs: 0,
+      coverage: 100, stopped: 0, parts: [], score: 0, level: 'LOW', empty: true});
+  }
+  return out;
+}
+
 /** Fleet-wide repeat-failure totals, for the "problems are coming back" page. */
 function repeatSummary(recs, minRepeat){
   const rep = repeats(recs, minRepeat || 2);
@@ -3518,6 +3541,7 @@ const S = {
   cmpMode: 'prev',       // what "ตอนนี้" is compared with — see 10b PERIOD
   curMonth: '',          // '' = the latest complete month
   thBasis: 'median',
+  brSort: 'code',      // สาขา: เรียงตามเลขสาขา (ค่าเริ่มต้น) หรือความเสี่ยง
   cuts: {},              // saving simulator: group key -> % reduction
   actions: [],           // action plan, persisted per browser
   edits: {},             // record key -> corrected fields (never touches the file)
@@ -3603,7 +3627,8 @@ function ctx(){
   const q = quadrants(groups, S.thBasis);
   const scored = scoreGroups(groups, recs);
   const tr = trend(recs);
-  const br = branchScores(recs, o.months);
+  // every branch in scope, including the ones with a quiet month
+  const br = padBranches(branchScores(recs, o.months), kept, S.f);
   const rs = repeatSummary(recs, S.minRepeat);
   const planned = sum(byHours.map(r => savingOf(r, o.months, S.cuts[r.key] || 0)));
   const editCount = Object.keys(S.edits).length;
@@ -4628,6 +4653,16 @@ P.branch = c => {
   const mvB = new Map(mvRows.map(r => [r.key, r]));
   const upB = new Map(uptimeByBranch(c.measureRecs, [per.curMonth], per).map(b => [b.code, b]));
 
+  /* Branch code order is how the team looks a branch up (QW01, QW02, … WAG01);
+     risk order is how the team decides where to go first. Both are one click
+     apart, and the code order is the default because finding a branch is the
+     commoner job. `numeric` keeps QW2 before QW10. */
+  const byCode = (a, b) => String(a.branch).localeCompare(String(b.branch), 'en', {numeric: true});
+  const brList = S.brSort === 'risk' ? br : [...br].sort(byCode);
+  const sortToggle = `<div style="display:flex;gap:6px">
+    ${[['code', 'เลขสาขา'], ['risk', 'ความเสี่ยง']].map(([k, lb]) =>
+      `<button class="btn sm${S.brSort === k ? ' on' : ' ghost'}" data-brsort="${k}">${lb}</button>`).join('')}</div>`;
+
   const spark = code => {
     const ser = hoursBy.get(code) || months6.map(() => 0);
     const mx = Math.max(1, ...ser);
@@ -4652,7 +4687,8 @@ P.branch = c => {
   </div>
 
   <div class="grid g4" style="margin-bottom:14px">
-    ${kpiCard({label:'สาขาทั้งหมด', raw:br.length, unit:'สาขา', sub:`${n0(o.n)} ใบงาน`, tone:'info', d:1})}
+    ${kpiCard({label:'สาขาทั้งหมด', raw:br.length, unit:'สาขา',
+      sub:`${n0(o.n)} ใบงาน · ไม่มีงานซ่อมเลย ${n0(br.filter(b => b.empty).length)} สาขา`, tone:'info', d:1})}
     ${kpiCard({label:'สาขาระดับ CRITICAL', raw:crit.length, unit:'สาขา',
       sub: crit.length ? crit.slice(0,3).map(b => b.branch).join(', ') : 'ไม่มี', tone:'crit', d:2})}
     ${kpiCard({label:'สาขาที่ Downtime สูงสุด', value: br[0] ? br[0].branch : '—',
@@ -4690,7 +4726,7 @@ P.branch = c => {
 
   ${bare('Heatmap — ความรุนแรงรายสาขา',
     `<div class="bd"><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(122px,1fr));gap:7px">
-      ${br.map((b, i) => {
+      ${brList.map((b, i) => {
         const t = b.hours / maxH;
         return `<button class="clickrow" data-drill="branch" data-key="${esc(b.branch)}"
           title="${esc(b.name)} — ${hr(b.hours)} · ${n0(b.count)} ครั้ง · Risk ${b.score}"
@@ -4704,12 +4740,15 @@ P.branch = c => {
         </button>`;
       }).join('') || '<p class="empty"><b>ยังไม่มีข้อมูล</b></p>'}
     </div>
-    <p style="font-size:12.5px;color:var(--muted);margin-top:11px">สีเข้ม = Downtime สูง · กรอบสีบอกระดับความเสี่ยง (Risk Level) · กดเพื่อเจาะดูรายสาขา</p></div>`)}
+    <p style="font-size:12.5px;color:var(--muted);margin-top:11px">สีเข้ม = Downtime สูง · กรอบสีบอกระดับความเสี่ยง (Risk Level) ·
+      เรียงตาม${S.brSort === 'risk' ? 'ความเสี่ยง' : 'เลขสาขา'} · กดเพื่อเจาะดูรายสาขา</p></div>`,
+    '', sortToggle)}
 
   <section class="card" style="margin-top:14px">
     <div class="hd"><div><h3>ตารางสาขา — ทุกอย่างของสาขานั้นในแถวเดียว</h3>
       <p>ความเสี่ยง · ชั่วโมง · จำนวนงาน · เทียบเดือนก่อน · แนวโน้ม 6 เดือน · ปัญหาอันดับ 1 · %Uptime ·
-        กดแถวเพื่อเจาะดูรายละเอียด</p></div></div>
+        กดแถวเพื่อเจาะดูรายละเอียด</p></div>
+      <div style="text-align:right"><p class="eyebrow" style="margin-bottom:5px">เรียงตาม</p>${sortToggle}</div></div>
     ${tableHTML(
       [{h:'สาขา'},{h:'แบรนด์'},
        // only when a roster is loaded — a column of dashes tells nobody anything
@@ -4718,7 +4757,7 @@ P.branch = c => {
        {h:'ครั้ง', num:1},{h:'เฉลี่ย/ครั้ง', num:1},
        {h:`เทียบ${per.baseName}`, num:1},{h:'แนวโน้ม 6 เดือน'},{h:'ปัญหาอันดับ 1'},
        {h:'%Uptime', num:1},{h:'คู่ที่ซ้ำ', num:1},{h:'ข้อมูลครบ', num:1}],
-      br.map(b => {
+      brList.map(b => {
         const owner = roster() ? rosterOwner(b.name || b.branch) : null;
         const row = [
           `<span class="st">${esc(b.branch)}</span> <span style="color:var(--muted)">${esc(clip(b.name.replace(/^\S+\s*/, ''), 18))}</span>`,
@@ -4730,7 +4769,8 @@ P.branch = c => {
               ? '<span style="color:var(--muted)">—</span>'
               : '<span style="color:var(--warn-ink)">ยังไม่มีในไฟล์ช่าง</span>'] : []),
           `<b class="tab">${b.score}</b>`,
-          `<span class="chip ${LEVEL_TONE[b.level]}">${b.level}</span>`,
+          b.empty ? '<span class="chip good">ไม่มีงานซ่อม</span>'
+            : `<span class="chip ${LEVEL_TONE[b.level]}">${b.level}</span>`,
           n1(b.hours), n1(b.perMonth), n0(b.count), n1(b.avgHours),
           cmpCell(b.branch),
           spark(b.branch),
@@ -8720,6 +8760,8 @@ function bindGlobalEvents(){
     if(t.closest('[data-closedrill]')){ closeDrill(); return; }
     const drill = t.closest('[data-drill]');
     if(drill){ openDrill(drill.dataset.drill, drill.dataset.key); return; }
+    const bso = t.closest('[data-brsort]');
+    if(bso){ S.brSort = bso.dataset.brsort; render(); return; }
     const th = t.closest('[data-th]');
     if(th){ S.thBasis = th.dataset.th; render(); return; }
     const mr = t.closest('[data-minrep]');
