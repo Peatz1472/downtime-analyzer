@@ -3838,8 +3838,10 @@ P.overview = c => {
 
   <div class="grid g3">
     ${bare('📍 สาขาที่ต้องส่งทีมไปก่อน',
-      `<div class="bd" style="display:flex;flex-direction:column;gap:8px">
-        ${br.slice(0, 5).map(b => `
+      // every branch, not a top five: the user asked to see the whole fleet
+      // here, so the list scrolls instead of being cut off
+      `<div class="bd" style="display:flex;flex-direction:column;gap:8px;max-height:430px;overflow-y:auto">
+        ${br.map(b => `
           <button class="clickrow" data-drill="branch" data-key="${esc(b.branch)}"
             style="display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;
                    background:none;border:0;padding:7px 8px;border-radius:9px;cursor:pointer;text-align:left"
@@ -3854,7 +3856,7 @@ P.overview = c => {
               <span style="display:block;font-size:11.5px;font-weight:650;margin-top:3px">${
                 movedLine({key: b.branch}, mvBranch)}</span></span>
           </button>`).join('') || '<p class="empty"><b>ยังไม่มีข้อมูล</b></p>'}
-      </div>`, `เรียงตาม Risk Score · บรรทัดล่างคือเทียบ${esc(per.baseName)}`)}
+      </div>`, `ทั้งหมด ${n0(br.length)} สาขา · เรียงตาม Risk Score · บรรทัดล่างคือเทียบ${esc(per.baseName)} · เลื่อนดูได้`)}
 
     ${bare('🔁 ปัญหาเกิดซ้ำ (Repeat Failure)',
       `<div class="bd">
@@ -4594,9 +4596,54 @@ P.repeat = c => {
 
 /* ---------- 📍 BRANCH ---------- */
 P.branch = c => {
-  const {br, o} = c;
+  const {br, o, per} = c;
   const maxH = Math.max(1, ...br.map(b => b.hours));
   const crit = br.filter(b => b.level === 'CRITICAL');
+
+  /* Everything a branch row should answer, precomputed in one pass instead of
+     re-filtering the records once per branch per column. */
+  const months6 = per.axis.filter(m => m <= per.curMonth).slice(-6);
+  const mIdx = new Map(months6.map((m, i) => [m, i]));
+  const hoursBy = new Map();     // branch -> hours per month, in months6 order
+  const topBy = new Map();       // branch -> system -> hours
+  for(const r of c.recs){
+    if(!r.branchCode) continue;
+    let ser = hoursBy.get(r.branchCode);
+    if(!ser) hoursBy.set(r.branchCode, ser = months6.map(() => 0));
+    const i = mIdx.get(r.month);
+    if(i != null && r.hours != null) ser[i] += r.hours;
+    let t = topBy.get(r.branchCode);
+    if(!t) topBy.set(r.branchCode, t = new Map());
+    const k = r.category || '(ไม่ระบุ)';
+    t.set(k, (t.get(k) || 0) + (r.hours != null ? r.hours : 0));
+  }
+  const topProblem = code => {
+    const t = topBy.get(code);
+    if(!t) return null;
+    return [...t.entries()].sort((a, b) => b[1] - a[1])[0];
+  };
+  // this month against the chosen base, per branch — the same comparison the
+  // overview and the Problems page use, asked of branches
+  const mvRows = monthCompare(c.measureRecs, per, r => r.branchCode);
+  const mvB = new Map(mvRows.map(r => [r.key, r]));
+  const upB = new Map(uptimeByBranch(c.measureRecs, [per.curMonth], per).map(b => [b.code, b]));
+
+  const spark = code => {
+    const ser = hoursBy.get(code) || months6.map(() => 0);
+    const mx = Math.max(1, ...ser);
+    return `<span title="${esc(months6.map((m, i) => monthLabel(m) + ' ' + n1(ser[i])).join(' · '))}"
+      style="display:inline-flex;align-items:flex-end;gap:2px;height:20px">${ser.map((v, i) => `
+      <i style="display:block;width:5px;border-radius:1px;height:${Math.max(2, v / mx * 18)}px;
+        background:var(--${i === ser.length - 1 ? 'crit' : 's1'});opacity:${v ? 1 : .22}"></i>`).join('')}</span>`;
+  };
+  const cmpCell = code => {
+    const m = mvB.get(code);
+    if(!m) return '<span style="color:var(--muted)">—</span>';
+    if(m.base <= 0.05 && m.cur > 0.05) return '<span class="chip crit">🆕 ใหม่</span>';
+    if(Math.abs(m.delta) <= 0.05) return '<span style="color:var(--muted)">เท่าเดิม</span>';
+    const down = m.delta < 0;
+    return `<b class="tab" style="color:var(--${down ? 'good' : 'crit'}-ink)">${down ? '▼' : '▲'} ${n1(Math.abs(m.delta))}</b>`;
+  };
   return `
   <div class="ph reveal">
     <div class="k">📍 Branch</div>
@@ -4610,8 +4657,12 @@ P.branch = c => {
       sub: crit.length ? crit.slice(0,3).map(b => b.branch).join(', ') : 'ไม่มี', tone:'crit', d:2})}
     ${kpiCard({label:'สาขาที่ Downtime สูงสุด', value: br[0] ? br[0].branch : '—',
       sub: br[0] ? `${hr(br[0].hours)} · ${n0(br[0].count)} ครั้ง` : '', tone:'crit', d:3})}
-    ${kpiCard({label:'Downtime เฉลี่ยต่อสาขา', raw: br.length ? sum(br, b => b.hours)/br.length : 0, dp:1,
-      unit:'ชม.', sub:`ตลอด ${o.months} เดือน`, tone:'warn', d:4})}
+    ${(() => {
+      const missed = [...upB.values()].filter(u => u.pct < UPTIME_TARGET);
+      return kpiCard({label:`สาขาที่หลุดเป้า Uptime (${UPTIME_TARGET.toFixed(2)}%)`, raw: missed.length, unit:'สาขา',
+        sub: `เดือน ${monthLabel(per.curMonth)} · เสียเกินโควตารวม ${hr(sum(missed, u => Math.max(0, u.down - u.budget)))}`,
+        tone: missed.length ? 'crit' : 'good', d:4});
+    })()}
   </div>
 
   ${br.length ? `<div class="banner ${br[0].level === 'CRITICAL' ? 'crit' : 'warn'} reveal" style="margin-bottom:14px">
@@ -4624,6 +4675,18 @@ P.branch = c => {
         msg += `<br><b>${esc(odd.branch)}</b> มีจำนวนครั้งไม่สูง (${n0(odd.count)} ครั้ง) แต่ Downtime ต่อครั้งสูงมาก (${hr(odd.avgHours)}/ครั้ง) ควรตรวจสอบ Root Cause`;
       return msg;
     })()}</div></div>` : ''}
+
+  ${(() => {
+    const better = mvRows.filter(r => r.delta < -0.05), worse = mvRows.filter(r => r.delta > 0.05);
+    if(!better.length && !worse.length) return '';
+    return bare(`สาขาไหนดีขึ้น สาขาไหนแย่ลง — เดือน ${esc(monthLabel(per.curMonth))} เทียบกับ${esc(per.baseName)}`,
+      `<div class="bd">
+        <p style="font-size:var(--t-xs);color:var(--muted);margin-bottom:10px">
+          ดีขึ้นรวม <b style="color:var(--good-ink)">${hr(Math.abs(sum(better, r => r.delta)))}</b> จาก ${n0(better.length)} สาขา ·
+          แย่ลงรวม <b style="color:var(--crit-ink)">${hr(sum(worse, r => r.delta))}</b> จาก ${n0(worse.length)} สาขา</p>
+        ${moversHTML(mvRows, per, 5)}
+      </div>`, 'ตอบว่าที่ส่งทีมไปแล้ว สาขาไหนดีขึ้นจริง', '', 'brk') + '<div style="height:14px"></div>';
+  })()}
 
   ${bare('Heatmap — ความรุนแรงรายสาขา',
     `<div class="bd"><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(122px,1fr));gap:7px">
@@ -4644,13 +4707,17 @@ P.branch = c => {
     <p style="font-size:12.5px;color:var(--muted);margin-top:11px">สีเข้ม = Downtime สูง · กรอบสีบอกระดับความเสี่ยง (Risk Level) · กดเพื่อเจาะดูรายสาขา</p></div>`)}
 
   <section class="card" style="margin-top:14px">
-    <div class="hd"><div><h3>ตารางสาขา</h3><p>กดแถวเพื่อเจาะดูเครื่อง / ระบบ / ปัญหาที่ซ้ำ</p></div></div>
+    <div class="hd"><div><h3>ตารางสาขา — ทุกอย่างของสาขานั้นในแถวเดียว</h3>
+      <p>ความเสี่ยง · ชั่วโมง · จำนวนงาน · เทียบเดือนก่อน · แนวโน้ม 6 เดือน · ปัญหาอันดับ 1 · %Uptime ·
+        กดแถวเพื่อเจาะดูรายละเอียด</p></div></div>
     ${tableHTML(
       [{h:'สาขา'},{h:'แบรนด์'},
        // only when a roster is loaded — a column of dashes tells nobody anything
        ...(roster() ? [{h:'ช่างที่ดูแล'}] : []),
        {h:'Risk', num:1},{h:'ระดับ'},{h:'Downtime (ชม.)', num:1},{h:'ชม./เดือน', num:1},
-       {h:'ครั้ง', num:1},{h:'เฉลี่ย/ครั้ง', num:1},{h:'คู่ที่ซ้ำ', num:1},{h:'ข้อมูลครบ', num:1}],
+       {h:'ครั้ง', num:1},{h:'เฉลี่ย/ครั้ง', num:1},
+       {h:`เทียบ${per.baseName}`, num:1},{h:'แนวโน้ม 6 เดือน'},{h:'ปัญหาอันดับ 1'},
+       {h:'%Uptime', num:1},{h:'คู่ที่ซ้ำ', num:1},{h:'ข้อมูลครบ', num:1}],
       br.map(b => {
         const owner = roster() ? rosterOwner(b.name || b.branch) : null;
         const row = [
@@ -4665,6 +4732,14 @@ P.branch = c => {
           `<b class="tab">${b.score}</b>`,
           `<span class="chip ${LEVEL_TONE[b.level]}">${b.level}</span>`,
           n1(b.hours), n1(b.perMonth), n0(b.count), n1(b.avgHours),
+          cmpCell(b.branch),
+          spark(b.branch),
+          (() => { const t = topProblem(b.branch);
+            return t ? `<span title="${esc(t[0])}">${esc(clip(t[0], 22))}</span>
+              <span style="color:var(--muted)"> ${n1(t[1])} ชม.</span>` : '<span style="color:var(--muted)">—</span>'; })(),
+          (() => { const u = upB.get(b.branch);
+            if(!u) return '<span style="color:var(--good-ink)">100%</span>';
+            return `<b class="tab" style="color:var(--${u.pct >= UPTIME_TARGET ? 'good' : 'crit'}-ink)">${n1(u.pct)}%</b>`; })(),
           b.repeatPairs ? `<span style="color:var(--crit-ink);font-weight:700">${b.repeatPairs}</span>` : '0',
           `<span style="color:${b.coverage >= 80 ? 'var(--good-ink)' : b.coverage >= 50 ? 'var(--warn-ink)' : 'var(--crit-ink)'}">${pc(b.coverage, 0)}</span>`];
         row.__attr = ` class="clickrow" data-drill="branch" data-key="${esc(b.branch)}"`;
