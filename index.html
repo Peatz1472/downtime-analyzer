@@ -2599,6 +2599,47 @@ async function pinOk(v){
   const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(v)));
   return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join('') === DEPLOY_PIN_SHA;
 }
+/* Typing the PIN on every publish is what made the monthly routine feel heavy,
+   and it protects nothing extra: the browser that holds the token is already
+   the one trusted to publish. So the PIN unlocks THIS browser once, and can be
+   locked again from the same dialog. */
+const PIN_OK_KEY = 'dra.deploy.pin.v1';
+const pinRemembered = () => { try { return localStorage.getItem(PIN_OK_KEY) === DEPLOY_PIN_SHA; } catch(e){ return false; } };
+const rememberPin = on => { try { on ? localStorage.setItem(PIN_OK_KEY, DEPLOY_PIN_SHA)
+  : localStorage.removeItem(PIN_OK_KEY); } catch(e){} };
+
+/** One link that lands on the exact GitHub page with the right box already
+    ticked — the old instructions asked the user to find five menus. */
+const GH_TOKEN_URL = 'https://github.com/settings/tokens/new?scopes=public_repo&description=Downtime+Analyzer';
+
+/** Does this token actually work, and may it write this repo? Answered before
+    anything is published, in words rather than an HTTP status. */
+async function ghCheck(token){
+  const head = {Authorization: 'token ' + token, Accept: 'application/vnd.github+json'};
+  let who;
+  try { who = await fetch('https://api.github.com/user', {headers: head, cache: 'no-store'}); }
+  catch(e){ return {ok: false, why: 'ต่ออินเทอร์เน็ตไม่ได้'}; }
+  if(who.status === 401) return {ok: false, why: 'token ไม่ถูกต้องหรือหมดอายุแล้ว'};
+  if(!who.ok) return {ok: false, why: 'GitHub ตอบกลับผิดปกติ (' + who.status + ')'};
+  const login = (await who.json()).login;
+  const rp = await fetch('https://api.github.com/repos/' + GH_REPO, {headers: head, cache: 'no-store'});
+  if(rp.status === 404) return {ok: false, why: 'token นี้มองไม่เห็น repo ' + GH_REPO + ' (เลือก scope public_repo หรือยัง)'};
+  if(!rp.ok) return {ok: false, why: 'อ่านข้อมูล repo ไม่ได้ (' + rp.status + ')'};
+  const perm = (await rp.json()).permissions || {};
+  if(!perm.push) return {ok: false, why: 'token นี้เข้าได้แต่เขียนไม่ได้ — ต้องติ๊ก public_repo ตอนสร้าง'};
+  return {ok: true, login};
+}
+
+/** What the website is serving right now — so "ขึ้นหรือยัง" has an answer on
+    the same screen instead of a refresh-and-hope. */
+async function liveStamp(){
+  try {
+    const r = await fetch('https://peatz1472.github.io/downtime-analyzer/data.enc.json?t=' + Date.now(), {cache: 'no-store'});
+    if(!r.ok) return null;
+    const j = await r.json();
+    return j.stamp || null;
+  } catch(e){ return null; }
+}
 
 const canDeploy = () => location.protocol === 'http:' &&
   (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
@@ -2648,6 +2689,10 @@ async function currentState(){
 function deployDialog(){
   const mode = deployMode();
   const needPin = mode !== 'export';
+  /* Once this browser is unlocked and connected, publishing on the website is
+     one button. The localhost path keeps asking: serve.mjs checks the PIN
+     itself, and that copy is the one that can rewrite the whole repo. */
+  const pinDone = mode === 'web' && pinRemembered();
   const summary = `ข้อมูลใบงาน <b>${n0(S.raw.length)}</b> ใบ ·
     แผนงาน <b>${n0(S.actions.length)}</b> งาน ·
     การแก้ไข <b>${n0(Object.keys(S.edits).length)}</b> รายการ ·
@@ -2666,27 +2711,42 @@ function deployDialog(){
           : `หน้านี้เปิดจากไฟล์ในเครื่อง จึงสั่ง deploy เองไม่ได้ —
              แต่<b>ข้อมูลที่คุณแก้ไว้อยู่ที่นี่ที่เดียว</b><br>${summary}<br>
              กดปุ่มด้านล่างเพื่อรวมทั้งหมดเป็นไฟล์เดียว แล้วส่งไฟล์นั้นไปขึ้นเว็บ`}</p>
-      ${needPin ? `
+      ${needPin && !pinDone ? `
       <label class="deploylabel" for="deployPin">รหัส deploy</label>
       <input class="inp" id="deployPin" type="password" inputmode="numeric"
-        autocomplete="off" style="height:40px" placeholder="••••••••">` : ''}
-      ${mode === 'web' ? `
-      <div id="deployTokBox" ${ghToken() ? 'hidden' : ''}>
-        <label class="deploylabel" style="margin-top:12px" for="deployTok">GitHub token</label>
+        autocomplete="off" style="height:40px" placeholder="••••••••">
+      <label style="display:flex;align-items:center;gap:7px;margin-top:8px;font-size:var(--t-xs);color:var(--ink2)">
+        <input type="checkbox" id="deployPinKeep" checked> จำไว้ในเครื่องนี้ ครั้งหน้าไม่ต้องใส่อีก</label>` : ''}
+      ${needPin && pinDone ? `<p style="font-size:var(--t-xs);color:var(--good-ink);margin-bottom:4px">
+        ✓ เครื่องนี้ปลดล็อกไว้แล้ว — ไม่ต้องใส่รหัส ·
+        <a href="#" id="deployPinForget" style="color:var(--muted)">ล็อกใหม่</a></p>` : ''}
+      ${mode === 'web' ? (ghToken() ? `
+      <p style="font-size:var(--t-xs);color:var(--good-ink);margin-top:6px">
+        ✓ เชื่อม GitHub ไว้แล้ว · <a href="#" id="deployTokClear" style="color:var(--muted)">เปลี่ยน/ลบ</a></p>`
+      : `
+      <div id="deployTokBox" style="margin-top:14px;background:var(--surface2);border:1px solid var(--line);
+           border-radius:12px;padding:13px 15px">
+        <p style="font-size:var(--t-sm);font-weight:700;margin-bottom:4px">ตั้งค่าครั้งเดียว (ครั้งเดียวจริง ๆ)</p>
+        <p style="font-size:var(--t-xs);color:var(--muted);line-height:var(--lh-body);margin-bottom:10px">
+          เว็บนี้เป็นไฟล์นิ่ง ๆ จึงต้องมีกุญแจของ GitHub ไว้เขียนข้อมูลกลับ —
+          กุญแจเก็บในเบราว์เซอร์เครื่องนี้เท่านั้น ไม่ได้ฝังในหน้าเว็บ</p>
+        <a class="btn primary" href="${GH_TOKEN_URL}" target="_blank" rel="noopener"
+          style="display:inline-flex;height:36px;align-items:center">① เปิดหน้าสร้างกุญแจที่ GitHub</a>
+        <p style="font-size:var(--t-xs);color:var(--ink2);line-height:var(--lh-body);margin:9px 0 6px">
+          หน้าที่เปิดขึ้นมา ติ๊ก <b>public_repo</b> ไว้ให้แล้ว → เลื่อนลงล่างสุดกด
+          <b>Generate token</b> → คัดลอกข้อความที่ขึ้นมา (ขึ้นต้นด้วย <code class="kbd">ghp_</code>)</p>
+        <label class="deploylabel" for="deployTok">② วางกุญแจตรงนี้</label>
         <input class="inp" id="deployTok" type="password" autocomplete="off"
-          style="height:40px" placeholder="github_pat_…">
-        <p style="font-size:var(--t-2xs);color:var(--muted);line-height:var(--lh-body);margin-top:5px">
-          ใส่ครั้งเดียว เก็บไว้ในเบราว์เซอร์เครื่องนี้เท่านั้น ไม่ได้อยู่ในหน้าเว็บ ·
-          สร้างที่ GitHub → Settings → Developer settings → Fine-grained tokens ·
-          ให้สิทธิ์เฉพาะ repo <b>${esc(GH_REPO)}</b> · Contents: Read and write</p>
-      </div>
-      ${ghToken() ? `<p style="font-size:var(--t-2xs);color:var(--muted);margin-top:10px">
-        🔑 มี token เก็บไว้แล้ว · <a href="#" id="deployTokClear" style="color:var(--brand)">เปลี่ยน/ลบ</a></p>` : ''}
-      ` : ''}
+          style="height:40px" placeholder="ghp_…">
+        <button class="btn sm" id="deployTokTest" style="margin-top:8px">ทดสอบและบันทึก</button>
+        <span id="deployTokMsg" style="font-size:var(--t-xs);margin-left:8px"></span>
+      </div>`) : ''}
+      <p id="deployLive" style="font-size:var(--t-2xs);color:var(--muted);margin-top:10px"></p>
       <div id="deployLog"></div>
       <div style="display:flex;gap:8px;margin-top:16px">
         <button class="btn primary" id="deployGo" style="flex:1;height:40px">${needPin
-          ? 'เผยแพร่' : '📤 สร้างไฟล์ dra-state.json'}</button>
+          ? (mode === 'web' && ghToken() && pinDone ? '🚀 เผยแพร่เลย' : 'เผยแพร่')
+          : '📤 สร้างไฟล์ dra-state.json'}</button>
         <button class="btn" id="deployCancel" style="height:40px">ยกเลิก</button>
       </div>
     </div>`;
@@ -2701,12 +2761,42 @@ function deployDialog(){
   if(pin){ setTimeout(() => pin.focus(), 50); pin.onkeydown = e => { if(e.key === 'Enter') go.click(); }; }
   const tokClear = $('deployTokClear');
   if(tokClear) tokClear.onclick = e => { e.preventDefault(); setGhToken(''); close(); deployDialog(); };
+  const pinForget = $('deployPinForget');
+  if(pinForget) pinForget.onclick = e => { e.preventDefault(); rememberPin(false); close(); deployDialog(); };
+
+  /* the token is checked against GitHub before it is kept, so a wrong paste is
+     caught here instead of half way through a publish */
+  const tokTest = $('deployTokTest');
+  if(tokTest) tokTest.onclick = async () => {
+    const v = ($('deployTok').value || '').trim();
+    const msg = $('deployTokMsg');
+    if(!v){ $('deployTok').focus(); return; }
+    tokTest.disabled = true; msg.innerHTML = '<span style="color:var(--muted)">กำลังตรวจ…</span>';
+    const r = await ghCheck(v);
+    tokTest.disabled = false;
+    if(!r.ok){ msg.innerHTML = '<span style="color:var(--crit-ink)">⛔ ' + esc(r.why) + '</span>'; return; }
+    setGhToken(v);
+    msg.innerHTML = '<span style="color:var(--good-ink)">✓ ใช้ได้ (' + esc(r.login) + ')</span>';
+    setTimeout(() => { close(); deployDialog(); }, 700);
+  };
+
+  /* what the site is serving right now, so the answer to "ขึ้นหรือยัง" is on
+     the screen rather than in a refresh */
+  if(mode === 'web'){
+    liveStamp().then(st => {
+      const el = $('deployLive');
+      if(el && st) el.innerHTML = 'ข้อมูลบนเว็บตอนนี้: <b>' + esc(fmtWhen(Date.parse(st))) + '</b>';
+      else if(el) el.textContent = '';
+    });
+  }
 
   const step = (ok, label) => `<p class="deploystep">${ok ? '✓' : '⏳'} ${esc(label)}</p>`;
   const fail = msg => {
     say(logBox.innerHTML + `<p class="deploystep" style="color:var(--crit-ink);font-weight:700">⛔ ${esc(msg)}</p>`);
     go.disabled = false; go.textContent = 'ลองใหม่';
     if(pin){ pin.disabled = false; }
+    // a token that stopped working is the one failure worth acting on here
+    if(/token|401|403/i.test(msg)) setTimeout(() => { setGhToken(''); close(); deployDialog(); }, 1500);
   };
 
   /* ---------- file:// — hand over the state file ---------- */
@@ -2731,8 +2821,9 @@ function deployDialog(){
   /* ---------- localhost — let serve.mjs run the real pipeline ---------- */
   if(mode === 'full'){
     go.onclick = async () => {
-      if(!pin.value){ pin.focus(); return; }
-      go.disabled = true; pin.disabled = true; go.textContent = 'กำลังเผยแพร่…';
+      if(!pinDone && !pin.value){ pin.focus(); return; }
+      if(!pinDone){ const keep = $('deployPinKeep'); if(keep && keep.checked && await pinOk(pin.value)) rememberPin(true); }
+      go.disabled = true; if(pin) pin.disabled = true; go.textContent = 'กำลังเผยแพร่…';
       say(`<p class="deploystep">⏳ กำลัง build → เข้ารหัส → ตรวจ → push …
         <span style="color:var(--muted)">ราว 1–2 นาที อย่าปิดหน้านี้</span></p>`);
       let res;
@@ -2741,7 +2832,7 @@ function deployDialog(){
         state.dataB64 = await datasetB64();
         const r = await fetch('/api/deploy', {method: 'POST',
           headers: {'content-type': 'application/json'},
-          body: JSON.stringify({pin: pin.value, state})});
+          body: JSON.stringify({pin: pin ? pin.value : '', state})});
         res = await r.json();
       } catch(e){
         res = {ok: false, error: 'ติดต่อเซิร์ฟเวอร์ในเครื่องไม่ได้ — ยังรัน node serve.mjs อยู่หรือเปล่า'};
@@ -2756,20 +2847,28 @@ function deployDialog(){
 
   /* ---------- the published site — publish through the GitHub API ---------- */
   go.onclick = async () => {
-    if(!pin.value){ pin.focus(); return; }
-    if(!await pinOk(pin.value)){
-      pin.value = ''; pin.focus();
-      say(`<p class="deploystep" style="color:var(--crit-ink);font-weight:700">⛔ รหัส deploy ไม่ถูกต้อง</p>`);
-      return;
+    if(!pinDone){
+      if(!pin.value){ pin.focus(); return; }
+      if(!await pinOk(pin.value)){
+        pin.value = ''; pin.focus();
+        say(`<p class="deploystep" style="color:var(--crit-ink);font-weight:700">⛔ รหัส deploy ไม่ถูกต้อง</p>`);
+        return;
+      }
+      const keep = $('deployPinKeep');
+      if(keep && keep.checked) rememberPin(true);
     }
     const tokIn = $('deployTok');
-    if(tokIn && tokIn.value.trim()) setGhToken(tokIn.value.trim());
+    if(tokIn && tokIn.value.trim()){
+      const r = await ghCheck(tokIn.value.trim());
+      if(!r.ok){ say(`<p class="deploystep" style="color:var(--crit-ink);font-weight:700">⛔ ${esc(r.why)}</p>`); return; }
+      setGhToken(tokIn.value.trim());
+    }
     if(!ghToken()){
       const b = $('deployTokBox'); if(b){ b.hidden = false; $('deployTok').focus(); }
-      say(`<p class="deploystep" style="color:var(--warn-ink)">ต้องใส่ GitHub token ก่อนหนึ่งครั้ง</p>`);
+      say(`<p class="deploystep" style="color:var(--warn-ink)">ยังไม่ได้เชื่อม GitHub — ทำตาม ① และ ② ด้านบนก่อน (ครั้งเดียว)</p>`);
       return;
     }
-    go.disabled = true; pin.disabled = true; go.textContent = 'กำลังเผยแพร่…';
+    go.disabled = true; if(pin) pin.disabled = true; go.textContent = 'กำลังเผยแพร่…';
     try {
       say(step(false, 'กำลังเข้ารหัสข้อมูลใหม่'));
       const state = await currentState();
