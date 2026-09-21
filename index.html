@@ -444,19 +444,29 @@ html.printfit .noprintfit{display:none!important}
   padding-top:13px;border-top:1px solid var(--line)}
 
 /* upload */
-#gate{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;align-items:center;justify-content:center;
+/* The screen starts at the top, never centred: once there are files to manage
+   this is a page you scroll, and a centred layout pushed the way out of view. */
+#gate{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;align-items:flex-start;justify-content:center;
   padding:24px;overflow:auto}
 #zone{max-width:860px;width:100%;border:2px dashed var(--line2);border-radius:20px;padding:44px 30px;text-align:center;
   background:var(--surface);transition:border-color .15s,background .15s;cursor:pointer}
 #zone.hot{border-color:var(--brand);background:var(--brand-soft)}
-#gateBar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;
-  padding:11px 15px;border-radius:12px;background:var(--surface);border:1px solid var(--line)}
+/* with data already loaded the drop target is a strip, not a hero: the files
+   are the point of the screen, dropping another one is a small action */
+#zone.slim{padding:13px 16px;text-align:left;border-radius:14px}
+#zoneSlim{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:var(--t-sm)}
+/* the way out has to stay on screen however far down the list goes */
+#gateBar{position:sticky;top:-24px;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:12px;
+  margin:-24px -4px 12px;padding:15px;border-radius:0 0 12px 12px;background:var(--surface);
+  border:1px solid var(--line);box-shadow:var(--shadow)}
 #gateSaved:not(:empty){margin-bottom:12px}
 .srcrow{display:flex;align-items:center;gap:11px;padding:9px 12px;border-radius:10px;background:var(--surface2);
   border:1px solid var(--line);font-size:12.5px}
 .srcrow + .srcrow{margin-top:6px}
 .srcrow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
-#toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:90;display:flex;align-items:center;
+/* above the file screen (100): the toast is where "เลิกทำ" lives, and a file is
+   most often removed from inside that screen */
+#toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:150;display:flex;align-items:center;
   gap:10px;max-width:min(720px,92vw);padding:10px 12px 10px 16px;border-radius:12px;background:var(--surface);
   border:1px solid var(--brand);box-shadow:var(--shadow-lg);font-size:12.5px;color:var(--ink2);
   animation:rise .3s both}
@@ -605,12 +615,21 @@ html.printfit .page.tall,#printroot .printpage.tall{
 <section id="gate">
   <div style="max-width:860px;width:100%">
     <div id="gateBar" hidden>
-      <div><b>จัดการข้อมูล</b>
+      <div><b>🗂 จัดการไฟล์ข้อมูล</b>
         <span style="color:var(--muted);font-size:12px">— เพิ่มไฟล์ใหม่ได้ตลอด ระบบจะรวมให้เอง</span></div>
-      <button class="btn sm" id="gateClose">✕ ปิด</button>
+      <button class="btn sm primary" id="gateClose">← กลับไปหน้าเว็บ</button>
     </div>
     <div id="gateSaved"></div>
     <div id="zone">
+     <div id="zoneSlim" hidden>
+       <span style="font-size:17px">＋</span>
+       <b>ลากไฟล์เดือนใหม่มาวางตรงนี้</b>
+       <button class="btn sm primary" id="pick2">เลือกไฟล์</button>
+       <span style="color:var(--muted);font-size:var(--t-xs);flex:1;min-width:200px">
+         รวมให้เองด้วยเลขที่งาน ไม่นับซ้ำ · อ่านในเครื่อง ไม่อัปโหลดขึ้นอินเทอร์เน็ต ·
+         ไฟล์ช่าง (.xls) วางรวมมาได้เลย</span>
+     </div>
+     <div id="zoneFull">
       <div style="font-size:34px;line-height:1;margin-bottom:12px">🏭</div>
       <h1>Downtime Reduction Analyzer</h1>
       <p style="margin-bottom:16px;color:var(--brand)"><b>QW &amp; WAG — Downtime Reduction Command Center</b></p>
@@ -623,17 +642,22 @@ html.printfit .page.tall,#printroot .printpage.tall{
         <button class="btn primary lg" id="pick">เลือกไฟล์</button>
         <button class="btn lg" id="demo">ดูตัวอย่างด้วยข้อมูลจำลอง</button>
       </div>
+     </div>
       <input type="file" id="file" accept=".xlsx,.xlsm,.xls,.csv,.txt" multiple hidden>
     </div>
     <div id="gateMsg" style="margin-top:14px"></div>
-    <div class="card" style="margin-top:14px;padding:16px 18px">
-      <p class="eyebrow" style="margin-bottom:10px">คอลัมน์ที่ระบบมองหา — จับคู่อัตโนมัติ รองรับทั้งฟอร์ม QW และ WAG</p>
+    <div id="gateBackWrap" hidden style="margin-top:14px;text-align:center">
+      <button class="btn lg primary" id="gateBack">← กลับไปหน้าเว็บ</button>
+      <p style="font-size:var(--t-xs);color:var(--muted);margin-top:7px">หรือกดปุ่ม Esc</p>
+    </div>
+    <details class="card" id="colHelpBox" style="margin-top:14px;padding:16px 18px">
+      <summary class="eyebrow" style="cursor:pointer;margin-bottom:10px">คอลัมน์ที่ระบบมองหา — จับคู่อัตโนมัติ รองรับทั้งฟอร์ม QW และ WAG</summary>
       <div id="colHelp" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px"></div>
       <p style="margin-top:11px;font-size:11.5px;color:var(--muted);line-height:1.7">
         จำเป็นขั้นต่ำ: <b>วันที่</b> + <b>สาขา</b> + <b>ระยะเวลา downtime</b> (หรือเวลาเริ่ม/เวลาเสร็จ)
         ส่วนที่เหลือไม่มีก็วิเคราะห์ได้ ระบบจะรายงานให้ในหน้า <b>Data Quality</b> ว่าขาดอะไรและกระทบอะไร
       </p>
-    </div>
+    </details>
   </div>
 </section>
 
@@ -814,7 +838,15 @@ const FIELDS=[
   ['equipGroup', 'ชุดอุปกรณ์ (คอลัมน์รอง)',['ชุดอุปกรณ์','machinerelated','equipmentgroup'], false],
   ['urgency',    'ลักษณะปัญหาที่พบ',      ['ลักษณะปัญหาที่พบ','ลักษณะการแก้ไขปัญหา','urgency'], false],
   ['acceptTime', 'เวลาที่ช่างกดรับงาน',   ['เวลาที่ช่างกดรับงาน.','เวลาที่ช่างกดรับงาน','accepttime'], false],
-  ['endTime',    'เวลาที่แก้ไขเสร็จ',      ['ช่วงเวลาที่แก้ไขเสร็จเรียบร้อย','ช่วงเวลาที่แก้ไขเสร็จเรียบร้อยพนักงาน','เวลาปิดงาน','เวลาที่แก้ไขเสร็จ','endtime','finishtime'], false],
+  // QW closes a ticket with เวลาปิดงาน — the form's "แก้ไขเสร็จเรียบร้อย
+  // (พนักงาน)" column is filled in on barely 7% of its rows, so preferring it
+  // threw away the end time of hundreds of finished jobs. WAG has no
+  // เวลาปิดงาน column at all and keeps its own, so the order settles QW only.
+  ['endTime',    'เวลาที่แก้ไขเสร็จ',      ['เวลาปิดงาน','ช่วงเวลาที่แก้ไขเสร็จเรียบร้อย','ช่วงเวลาที่แก้ไขเสร็จเรียบร้อยพนักงาน','เวลาที่แก้ไขเสร็จ','endtime','finishtime'], false],
+  // …and whichever of the two QW keeps ticking is the fallback, because some
+  // of its tickets carry one and some the other. WAG has a single column,
+  // already claimed above, so this stays empty there.
+  ['endTime2',   'เวลาที่แก้ไขเสร็จ (สำรอง)',['ช่วงเวลาที่แก้ไขเสร็จเรียบร้อยพนักงาน','ช่วงเวลาที่แก้ไขเสร็จเรียบร้อย','เวลาปิดงาน'], false],
   ['slaAccept',  'SLA รับงาน',           ['slaรับงาน'], false],
   ['slaRepair',  'SLA งานซ่อม',          ['slaงานซ่อม'], false],
   ['startTime',  'ช่วงเวลาที่เกิดปัญหา',   ['ช่วงเวลาที่เกิดปัญหา','ช่วงเวลาที่พบปัญหา','เวลาที่เกิดปัญหา','starttime','breakdownstart'], false],
@@ -972,7 +1004,10 @@ function buildRecords(grid,sourceName,brandHint){
     }
     const dateRaw=at(r,'date');
     const startMs=parseTime(at(r,'startTime'))??parseTime(dateRaw);
-    const endMs=parseTime(at(r,'endTime'));
+    const endPrim=parseTime(at(r,'endTime')), endAlt=parseTime(at(r,'endTime2'));
+    // the ticket is over at whichever end time the form actually carries; when
+    // both are filled the earlier one is when the machine was running again
+    const endMs=endPrim==null?endAlt:(endAlt==null?endPrim:Math.min(endPrim,endAlt));
     const dateISO=(parseTime(dateRaw)!=null)?new Date(parseTime(dateRaw)).toISOString().slice(0,10)
                  :(/^\d{4}-\d{2}-\d{2}/.test(dateRaw)?dateRaw.slice(0,10):'');
     // downtime: trust the duration string; recover from timestamps; else flag.
@@ -7844,13 +7879,38 @@ function render(){
 /** A one-off note about the data that was just loaded. Deliberately not a
     banner: it is about this moment, not about the numbers on the page. */
 let toastT = null;
-function toast(msg){
+function toast(msg, ms){
   const t = $('toast');
   $('toastMsg').innerHTML = '💾 ' + msg;
   t.hidden = false;
   clearTimeout(toastT);
-  toastT = setTimeout(() => { t.hidden = true; }, 9000);
+  toastT = setTimeout(() => { t.hidden = true; }, ms || 9000);
 }
+
+/* Taking a file out can take work that exists only in this tab, so it is never
+   final until the user has seen what went: the last removal is held here and
+   the toast that announces it carries the way back. */
+let removedFiles = null;
+function rememberRemoved(list, what){
+  if(!list || !list.length) return;
+  removedFiles = list.map(s => Object.assign({}, s));
+  toast(`เอา <b>${esc(what)}</b> ออกจากชุดข้อมูลแล้ว ` +
+    `<button class="btn sm" id="undoDel" style="margin-left:6px">↩ เลิกทำ</button>`, 20000);
+}
+function undoRemove(){
+  if(!removedFiles) return;
+  for(const s of removedFiles) mergeSource(s);
+  removedFiles = null;
+  rebuildFromSources();
+  ensureBasePerBrand();
+  saveDataset().then(() => {
+    assignKeys(S.raw);
+    if(S.raw.length){ closeGateIfEmptyWasOpen(); render(); if(gateOpen()) renderGateSources(); }
+    $('toast').hidden = true;
+  });
+}
+/* restoring from an empty set leaves the drop screen on top of a working app */
+function closeGateIfEmptyWasOpen(){ if(gateOpen() && S.raw.length) openGate(); }
 function mountCharts(root, c, forceWidth){
   const put = (name, node) => {
     const host = root.querySelector(`[data-ch="${name}"]`);
@@ -8363,7 +8423,8 @@ function bindGlobalEvents(){
     }
     if(t.id === 'aAdd'){ $('file').click(); return; }
     if(t.id === 'aNew'){ openGate(); return; }
-    if(t.id === 'gateClose'){ if(S.raw.length) closeGate(); return; }
+    if(t.id === 'gateClose' || t.id === 'gateBack'){ if(S.raw.length) closeGate(); return; }
+    if(t.id === 'undoDel'){ undoRemove(); return; }
     const bs = t.closest('[data-brand]');
     if(bs){
       const v = bs.dataset.brand;
@@ -8400,7 +8461,11 @@ function bindGlobalEvents(){
           'ไฟล์เดือนใหม่ที่เพิ่มเข้ามาจะรวมกับชุดนี้ตามเลขที่งาน ของเก่าไม่หาย');
         return;
       }
-      if(!confirm('เอาไฟล์ “' + s.name + '” ออกจากชุดข้อมูล?')) return;
+      const pending = lockOn() && s.dirty;
+      if(!confirm('เอาไฟล์ “' + s.name + '” ออกจากชุดข้อมูล?\n\n' +
+        (pending ? '⚠ ไฟล์นี้ยังไม่ได้บันทึกเข้าฐานข้อมูล ถ้าเอาออกตอนนี้จะต้องลากไฟล์มาใหม่'
+                 : 'กด “เลิกทำ” ในแถบข้อความด้านล่างเพื่อเอากลับมาได้'))) return;
+      rememberRemoved([s], s.name);
       S.sources.splice(i, 1);
       rebuildFromSources();
       // saved either way — an empty set is recorded as cleared so it stays gone
@@ -8414,7 +8479,13 @@ function bindGlobalEvents(){
     if(t.id === 'srcClearAdded'){
       const added = S.sources.filter(s => !s.base && !locked(s));
       if(!added.length) return;
-      if(!confirm('ล้าง ' + added.length + ' ไฟล์ที่เพิ่มเข้ามา แล้วเหลือไว้เฉพาะไฟล์ตั้งต้น?')) return;
+      const pending = added.filter(s => lockOn() && s.dirty);
+      if(!confirm('ล้างไฟล์ที่เพิ่มเข้ามา ' + added.length + ' ไฟล์?\n\n' +
+        added.map(s => '· ' + s.name + ' (' + n0(s.rows || 0) + ' แถว)').join('\n') +
+        '\n\nฐานข้อมูลหลักยังอยู่ครบ' +
+        (pending.length ? '\n⚠ ' + pending.length + ' ไฟล์ยังไม่ได้บันทึกเข้าฐานข้อมูล จะต้องลากมาใหม่'
+                        : ' · กด “เลิกทำ” เพื่อเอากลับมาได้'))) return;
+      rememberRemoved(added, added.length + ' ไฟล์ที่เพิ่มเข้ามา');
       S.sources = S.sources.filter(s => s.base || locked(s));
       rebuildFromSources();
       saveDataset().then(() => { assignKeys(S.raw); render(); renderGateSources(); });
@@ -8641,6 +8712,7 @@ function bindGlobalEvents(){
   });
 
   document.addEventListener('keydown', e => {
+    if(e.key === 'Escape' && gateOpen() && S.raw.length){ closeGate(); return; }
     if(e.key === 'Escape' && S.drill) closeDrill();
     if(/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName) || e.target.isContentEditable) return;
     if(e.key === 'ArrowRight' || e.key === 'ArrowLeft'){
@@ -8943,9 +9015,20 @@ function start(opt){
 }
 function closeGate(){ $('gate').style.display = 'none'; gateMsg(''); }
 function openGate(){
+  const has = !!S.raw.length;
   $('gate').style.display = 'flex';
-  $('gateBar').hidden = !S.raw.length;
-  $('gateClose').hidden = !S.raw.length;
+  /* With data already in the app this screen is a file MANAGER, so the way back
+     is pinned to the top, the hero shrinks to a strip and the column reference
+     folds away. Empty — first run, or everything cleared — it goes back to
+     being the drop target it has to be. */
+  $('gateBar').hidden = !has;
+  $('gateClose').hidden = !has;
+  $('gateBackWrap').hidden = !has;
+  $('zone').classList.toggle('slim', has);
+  $('zoneFull').hidden = has;
+  $('zoneSlim').hidden = !has;
+  $('colHelpBox').open = !has;
+  $('gate').scrollTop = 0;
   renderGateSources();
 }
 
@@ -9015,8 +9098,10 @@ function renderGateSources(){
         : storeWhere ? `รวม <b class="tab">${total}</b> แถว · ${esc(fmtKB(storeWhere.bytes))} ·
           ${storeWhere.kind === 'idb' ? 'IndexedDB' : 'localStorage'} ·
           บันทึกล่าสุด ${esc(fmtWhen(storeWhere.saved))}`
-        : S.sources.every(s => s.base)
-          ? `รวม <b class="tab">${total}</b> แถว · ข้อมูลตั้งต้นที่ฝังมากับไฟล์ ยังไม่มีไฟล์เพิ่มเติม`
+        : S.sources.every(s => s.base || s.core)
+          // nothing has been written to this browser yet, but nothing is at
+          // risk either: this is the set that shipped inside the file
+          ? `รวม <b class="tab">${total}</b> แถว · ข้อมูลที่ฝังมากับไฟล์ ยังไม่ได้บันทึกลงเครื่องนี้`
           : '⚠ ยังบันทึกถาวรไม่ได้ในเบราว์เซอร์นี้'}</span>
     </div>
     ${rows}
@@ -9094,6 +9179,7 @@ function demoGrid(){
 
   const zone = $('zone'), input = $('file');
   $('pick').onclick = e => { e.stopPropagation(); input.click(); };
+  $('pick2').onclick = e => { e.stopPropagation(); input.click(); };
   zone.onclick = () => input.click();
   input.onchange = e => {
     loadFiles([...e.target.files].map(f => ({file: f, path: f.webkitRelativePath || f.name})));
