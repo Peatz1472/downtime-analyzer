@@ -3657,6 +3657,25 @@ P.overview = c => {
   const {o, per, base, tgt, need, byHours, br, rs} = c;
   const {cur, gap, onTarget, progress, chg} = per;
   const top3 = byHours.slice(0, 3);
+  /* "ปัญหาเพิ่มหรือลด" belongs on the first screen, not one page deeper: the
+     same per-system comparison the Problems page draws, summarised here. */
+  const mv = monthCompare(c.measureRecs, per);
+  const mvBy = new Map(mv.map(r => [r.key, r]));
+  const better = mv.filter(r => r.delta < -0.05), worse = mv.filter(r => r.delta > 0.05);
+  const movedLine = r => {
+    const m = mvBy.get(r.key);
+    // a top problem can be a big number that is not happening any more: say so
+    // rather than leaving the row silent
+    if(!m) return `<span style="color:var(--muted)">— ไม่มีทั้งในเดือนนี้และเดือนที่เทียบ</span>`;
+    if(m.base <= 0.05 && m.cur > 0.05)
+      return `<span style="color:var(--crit-ink)">🆕 ของใหม่ในเดือนนี้ ${hr(m.cur)}</span>`;
+    if(Math.abs(m.delta) <= 0.05) return `<span style="color:var(--muted)">— เท่าเดิม</span>`;
+    const down = m.delta < 0;
+    // a % against a base of a few minutes reads as +7,200% and means nothing
+    const pctPart = m.chg == null || m.base < 1 ? '' : ` (${signPct(m.chg)})`;
+    return `<span style="color:var(--${down ? 'good' : 'crit'}-ink)">${down ? '▼ ลดลง' : '▲ เพิ่มขึ้น'}
+      ${hr(Math.abs(m.delta))}${pctPart}</span>`;
+  };
   const curL = monthLabel(per.curMonth);
   const tone = chgTone(chg);
   const moved = chg == null ? 'ยังไม่มีเดือนก่อนหน้าให้เทียบ'
@@ -3766,11 +3785,26 @@ P.overview = c => {
               <span data-count="${r.hours}" data-dp="1">0</span><small style="font-size:13px;color:var(--muted)"> ชม.</small>
             </div>
             <div style="font-size:12.5px;color:var(--muted);margin-top:2px">${n0(r.count)} ครั้ง · เฉลี่ย ${hr(r.avgHours)}/ครั้ง</div>
+            <div style="font-size:12.5px;margin-top:4px;font-weight:650">${movedLine(r)}
+              ${mvBy.has(r.key) ? `<span style="color:var(--muted);font-weight:500">เทียบ${esc(per.baseName)}</span>` : ''}</div>
             <div class="track" style="height:6px;margin-top:9px"><i data-pct="${r.share}" style="background:var(--crit)"></i></div>
           </button>`).join('') : '<p class="empty"><b>ยังไม่มีข้อมูล</b>ไม่มีงานที่ตรงกับตัวกรองนี้</p>'}
       </div>`,
       'กดการ์ดเพื่อเจาะดูรายละเอียด')}
   </div>
+
+  ${bare(`📊 เดือน ${esc(curL)} เทียบกับ${esc(per.baseName)} — อะไรลดลง อะไรเพิ่มขึ้น`,
+    `<div class="bd">
+      <p style="font-size:var(--t-xs);color:var(--muted);margin-bottom:10px;line-height:var(--lh-body)">
+        ลดลงรวม <b style="color:var(--good-ink)">${hr(Math.abs(sum(better, r => r.delta)))}</b> จาก ${n0(better.length)} ระบบ ·
+        เพิ่มขึ้นรวม <b style="color:var(--crit-ink)">${hr(sum(worse, r => r.delta))}</b> จาก ${n0(worse.length)} ระบบ
+        ${per.curPartial ? `<br><b style="color:var(--warn-ink)">เดือนนี้ยังไม่จบ</b> — เทียบเฉพาะวันที่ 1–${per.curDay} ของทั้งสองฝั่ง` : ''}</p>
+      ${moversHTML(mv, per, 4)}
+      <div style="margin-top:11px">
+        <button class="btn sm" data-go="problems">ดูครบทุกระบบในหน้าปัญหาหลัก →</button></div>
+    </div>`, 'ตอบว่าเดือนนี้ “ที่แก้ไปได้ผลอะไร” และ “อะไรโผล่มาใหม่”', '', 'brk')}
+
+  <div style="height:14px"></div>
 
   <div class="grid g3">
     ${bare('📍 สาขาที่ต้องส่งทีมไปก่อน',
