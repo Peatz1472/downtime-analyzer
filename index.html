@@ -902,6 +902,35 @@ function parseDuration(s){
   if(m) return Number(m[1]||0)*24+Number(m[2])+Number(m[3])/60+Number(m[4]||0)/3600;
   return null;
 }
+/* ---- when downtime actually accrues --------------------------------------
+   QW opens 08:00 and closes 20:00, WAG runs unattended around the clock, but a
+   technician is only on the job 09:00–18:00. So a machine that breaks at 15:00
+   and is running again at 10:00 the next morning was down for 3 + 1 = 4
+   countable hours, not 19: nothing could have been done overnight.
+   A job that starts AND finishes on the same day counts in full — it was dealt
+   with while the shop was open, so the clock on the wall is the honest number.
+   Past `capDays` working days the figure stops describing a machine and starts
+   describing a ticket nobody closed, so it is capped there and flagged. */
+const BIZ={open:9,close:18,capDays:3};
+const DAY_MS_=86400000;
+const dayOf=ms=>new Date(ms).toISOString().slice(0,10);
+const atHour=(day,h)=>Date.parse(day+'T'+String(h).padStart(2,'0')+':00:00Z');
+function bizDowntime(startMs,endMs){
+  if(startMs==null||endMs==null||endMs<startMs) return null;
+  const spanDays=(endMs-startMs)/DAY_MS_;
+  const cap=BIZ.capDays*(BIZ.close-BIZ.open);
+  if(dayOf(startMs)===dayOf(endMs)) return {hours:(endMs-startMs)/3600000,capped:false,spanDays};
+  // a span of years is a typo, not a repair — do not walk a decade of days
+  if(spanDays>400) return {hours:cap,capped:true,spanDays};
+  let total=0;
+  const last=Date.parse(dayOf(endMs)+'T00:00:00Z');
+  for(let d=Date.parse(dayOf(startMs)+'T00:00:00Z');d<=last;d+=DAY_MS_){
+    const k=dayOf(d),lo=Math.max(startMs,atHour(k,BIZ.open)),hi=Math.min(endMs,atHour(k,BIZ.close));
+    if(hi>lo) total+=(hi-lo)/3600000;
+  }
+  return total>cap?{hours:cap,capped:true,spanDays}:{hours:total,capped:false,spanDays};
+}
+
 function parseTime(s){
   if(!s) return null;
   let t=String(s).trim(); if(!t) return null;
@@ -1010,15 +1039,31 @@ function buildRecords(grid,sourceName,brandHint){
     const endMs=endPrim==null?endAlt:(endAlt==null?endPrim:Math.min(endPrim,endAlt));
     const dateISO=(parseTime(dateRaw)!=null)?new Date(parseTime(dateRaw)).toISOString().slice(0,10)
                  :(/^\d{4}-\d{2}-\d{2}/.test(dateRaw)?dateRaw.slice(0,10):'');
-    // downtime: trust the duration string; recover from timestamps; else flag.
-    let hours=parseDuration(at(r,'duration')), src='duration';
-    if(hours==null&&startMs!=null&&endMs!=null&&endMs>=startMs){hours=(endMs-startMs)/3600000;src='times';}
+    /* Downtime as the team counts it, from the two timestamps on the ticket.
+       The source system's own ระยะเวลา downtime column disagrees with those
+       timestamps on 501 of the 1,170 rows that carry both, so it is only the
+       fallback for rows that have no usable times at all. */
+    const durCol=parseDuration(at(r,'duration'));
+    const rawHours=(startMs!=null&&endMs!=null&&endMs>=startMs)?(endMs-startMs)/3600000:null;
+    const biz=bizDowntime(startMs,endMs);
+    let hours=null, src='none';
+    if(biz){ hours=biz.hours; src='times'; }
+    else if(durCol!=null){ hours=durCol; src='duration'; }
     if(hours==null){
-      src='none';
       const raw=at(r,'duration');
       if(raw&&/-/.test(raw)) addIssue(rowNo,'NEG_DURATION','ระยะเวลา downtime ติดลบ ("'+raw.slice(0,28)+'") — เวลาเสร็จมาก่อนเวลาเริ่ม',2);
       else addIssue(rowNo,'NO_DOWNTIME','ไม่มีระยะเวลา downtime และคำนวณจากเวลาเริ่ม/เสร็จไม่ได้',2);
-    }else if(hours>720){ addIssue(rowNo,'HUGE_DOWNTIME','downtime '+hours.toFixed(0)+' ชม. เกิน 1 เดือน — ควรตรวจสอบ',1); }
+    }else{
+      // a job nobody closed measures the paperwork, not the machine
+      if(biz&&biz.capped) addIssue(rowNo,'LATE_CLOSE','ปิดงานช้า — เปิดค้าง '+n1(biz.spanDays)+' วัน ('+
+        n1(rawHours)+' ชม. จริง) นับให้เพียง '+n1(hours)+' ชม. ตามเพดาน '+BIZ.capDays+' วันทำการ',1);
+      // and a duration column that contradicts its own timestamps is worth
+      // seeing: it is what made one ticket read 42.1 ชม. instead of 18.1
+      if(durCol!=null&&rawHours!=null&&Math.abs(durCol-rawHours)>1)
+        addIssue(rowNo,'DUR_MISMATCH','คอลัมน์ ระยะเวลา downtime ('+n1(durCol)+' ชม.) ไม่ตรงกับเวลาเริ่ม–ปิดงาน ('+
+          n1(rawHours)+' ชม.) — ระบบยึดเวลาเริ่ม–ปิดงาน',1);
+      if(src==='duration'&&hours>720) addIssue(rowNo,'HUGE_DOWNTIME','downtime '+hours.toFixed(0)+' ชม. เกิน 1 เดือน — ควรตรวจสอบ',1);
+    }
     if(!dateISO) addIssue(rowNo,'NO_DATE','ไม่มีวันที่แจ้งซ่อมที่อ่านได้',2);
     const branchRaw=at(r,'branch');
     if(!branchRaw) addIssue(rowNo,'NO_BRANCH','ไม่ระบุสาขา',1);
@@ -1066,6 +1111,10 @@ function buildRecords(grid,sourceName,brandHint){
       delayReason:at(r,'delayReason'),
       symptom:at(r,'symptom'),rootCause:at(r,'rootCause'),techFix:at(r,'techFix'),
       startMs,endMs,hours,hoursSource:src,
+      // the wall-clock gap, kept beside the counted hours so a ticket can always
+      // be read both ways — and so "ปิดงานช้า" can show what it really was
+      hoursRaw:rawHours,lateClose:!!(biz&&biz.capped),spanDays:biz?biz.spanDays:null,
+      durCol:durCol,
       hoursCol:at(r,'hoursCol'),
     });
   });
@@ -3554,6 +3603,11 @@ P.overview = c => {
       tone: onTarget ? 'good' : 'crit', pct: progress, d:5})}
   </div>
   ${note ? `<p class="reveal" style="font-size:var(--t-xs);color:var(--muted);margin:0 0 14px">${note}</p>` : ''}
+  <p class="reveal" style="font-size:var(--t-xs);color:var(--muted);margin:0 0 14px">
+    ⏱ ชั่วโมง downtime นับเฉพาะเวลาที่ช่างทำงานได้ <b>${BIZ.open}:00–${BIZ.close}:00</b> ·
+    งานที่จบภายในวันเดียวกันนับ<b>เวลาจริง</b> · ใบที่เปิดค้างเกิน ${BIZ.capDays} วันทำการ
+    นับสูงสุด ${n0(BIZ.capDays * (BIZ.close - BIZ.open))} ชม. แล้วขึ้นธง “ปิดงานช้า”
+    <button class="btn sm ghost" data-go="quality" style="padding:2px 8px">ดูรายการที่ติดธง</button></p>
 
   <section class="card ${onTarget ? '' : 'crit'} reveal" id="hero" data-d="2" style="margin-bottom:14px">
     <div style="position:relative;z-index:1">
@@ -4508,6 +4562,8 @@ P.quality = c => {
     TEMPLATE_ROW: ['แถวตัวอย่างในไฟล์', 'เซลล์มีข้อความเดียวกับหัวคอลัมน์ — ข้ามให้แล้ว ควรลบที่ต้นทาง'],
     NOT_A_FAILURE:['ไม่ใช่งานซ่อม', 'บันทึกความรู้/คู่มือถูกกรอกปนมาในตารางแจ้งซ่อม ทำให้ Pareto เพี้ยน'],
     UNKNOWN_MACHINE:['เครื่องไม่อยู่ในทะเบียน', 'จับคู่กับข้อมูลเครื่องไม่ได้'],
+    LATE_CLOSE:   ['ปิดงานช้า เกินเพดาน', 'ใบงานเปิดค้างเกิน 3 วันทำการ — นับให้ 27 ชม. ตามเพดาน ส่วนที่เหลือคือปัญหาการปิดงาน ไม่ใช่เครื่องเสีย'],
+    DUR_MISMATCH: ['คอลัมน์ downtime ไม่ตรงกับเวลาจริง', 'ค่าที่ระบบต้นทางคำนวณมาไม่ตรงกับเวลาเริ่ม–ปิดงานในใบเดียวกัน — ระบบยึดเวลาเริ่ม–ปิดงาน'],
   };
   return `
   <div class="ph reveal">
@@ -7248,9 +7304,13 @@ P.team = c => {
   const accAll = R.map(r => fileFlag(r.slaAccept)).filter(v => v !== null);
   const repAll = R.map(r => fileFlag(r.slaRepair)).filter(v => v !== null);
   const failed = R.filter(r => slaPass(r) === false);
-  const slowAll = wh.filter(r => r.hours > SLOW_H);
+  /* "ข้ามวัน" is now a fact on the ticket, not a threshold: counted hours stop
+     at 18:00 and restart at 09:00, so a job whose wall-clock gap is longer than
+     its counted hours is exactly a job that ran past a closing time. */
+  const crossedNight = r => r.hoursRaw != null && r.hours != null && r.hoursRaw > r.hours + 0.1;
+  const slowAll = wh.filter(crossedNight);
   const overHours = sum(failed, r => Math.max(0, r.hours - slaLimit(r)));
-  const slowOver = sum(slowAll, r => Math.max(0, r.hours - slaLimit(r)));
+  const slowOver = sum(slowAll.filter(r => slaPass(r) === false), r => Math.max(0, r.hours - slaLimit(r)));
   const notDone = R.filter(r => r.repairStatus && !/เสร็จ/.test(r.repairStatus)).length;
   const noHours = R.length - wh.length;
 
@@ -7307,17 +7367,19 @@ P.team = c => {
       dp:0, unit:'%', sub:`จาก ${n0(repAll.length)} ใบที่กรอกช่องนี้`, tone:'info', d:2})}
     ${kpiCard({label:'SLA รับงาน (ตามไฟล์)', raw: accAll.length ? accAll.filter(Boolean).length/accAll.length*100 : 0,
       dp:0, unit:'%', sub:'นาฬิกาเดินตั้งแต่ยังไม่เริ่มซ่อม', tone:'warn', d:3})}
-    ${kpiCard({label:`ใช้เวลาปิดเกิน ${SLOW_H} ชม.`, raw: slowAll.length, unit:'ใบ',
-      sub:`${pc(failed.length ? slowAll.length/failed.length*100 : 0, 0)} ของใบที่ตก SLA`, tone:'crit', d:4})}
+    ${kpiCard({label:'ใบที่ซ่อมข้ามวัน', raw: slowAll.length, unit:'ใบ',
+      sub:`${pc(wh.length ? slowAll.length/wh.length*100 : 0, 0)} ของใบที่มีเวลา · นับเฉพาะ ${BIZ.open}:00–${BIZ.close}:00`,
+      tone:'crit', d:4})}
     ${kpiCard({label:'ชั่วโมงที่เกินกติกา', raw: overHours, dp:0, unit:'ชม.',
       sub:`ใบที่ใช้เวลาข้ามวันกิน ${pc(overHours ? slowOver/overHours*100 : 0, 0)} ของก้อนนี้`, tone:'orange', d:5})}
   </div>
 
   <div class="banner crit reveal" style="margin-bottom:14px">
     <span class="i">🎯</span>
-    <div style="line-height:1.85"><b>เรื่องเดียวที่ต้องแก้:</b>
+    <div style="line-height:1.85"><b>เรื่องหลักที่ต้องแก้:</b>
       เวลาปิดงานกลางของทั้งบริษัทคือ <b>${n1(fleet.med0)} ชม.</b> ซึ่งอยู่ในกติกาอยู่แล้ว —
-      ที่ทำให้ SLA ตกคือ <b>${n0(slowAll.length)} ใบที่ใช้เวลาข้ามวัน</b>
+      ที่ทำให้ SLA ตกคือ <b>${n0(slowAll.length)} ใบที่ซ่อมข้ามวัน</b>
+      (${pc(failed.length ? slowAll.filter(r => slaPass(r) === false).length/failed.length*100 : 0, 0)} ของใบที่ตก SLA)
       ซึ่งกิน <b>${pc(overHours ? slowOver/overHours*100 : 0, 0)}</b> ของชั่วโมงที่เกินกติกาทั้งหมด<br>
       <span style="font-size:var(--t-xs);opacity:.9">ใบงานในไฟล์ปิดครบทุกใบแล้ว —
         ปัญหาอยู่ที่<b>บางใบใช้เวลานานผิดปกติ</b> ซึ่งเกิดจากคนละสาเหตุกัน
@@ -8048,6 +8110,7 @@ function openDrill(kind, key){
   const recs = C.recs.filter(r => kind === 'branch' ? r.branchCode === key : r.category === key);
   const withH = recs.filter(r => r.hours != null);
   const hours = sum(withH, r => r.hours);
+  const rawHours = sum(withH, r => r.hoursRaw != null ? r.hoursRaw : r.hours);
   const stopped = recs.filter(r => r.stopped === true).length;
   const byOther = pareto(groupBy(recs, r => kind === 'branch' ? r.category : r.branchCode), 'hours');
   const symptoms = pareto(groupBy(recs, r => r.detail || '(ไม่ระบุอาการ)'), 'hours').slice(0, 8);
@@ -8064,7 +8127,8 @@ function openDrill(kind, key){
           <p class="eyebrow">${kind === 'branch' ? 'เจาะลึกรายสาขา' : 'เจาะลึกรายระบบ'}</p>
           <h3 style="font-size:17px;font-weight:750;margin-top:3px;line-height:1.3">${esc(title)}</h3>
           <p style="font-size:12.5px;color:var(--muted);margin-top:3px">
-            ${n0(recs.length)} ใบงาน · ${hr(hours)} · เครื่องหยุดจริง ${n0(stopped)} ครั้ง</p>
+            ${n0(recs.length)} ใบงาน · ${hr(hours)} · เครื่องหยุดจริง ${n0(stopped)} ครั้ง${
+              rawHours > hours + 0.5 ? ` · <span title="เวลาจริงตั้งแต่แจ้งจนปิดงาน ก่อนตัดชั่วโมงนอกเวลาทำการ">เวลาจริง ${hr(rawHours)}</span>` : ''}</p>
         </div>
         <button class="btn sm ghost" data-closedrill style="flex:0 0 auto">✕</button>
       </div>
@@ -8118,7 +8182,13 @@ function openDrill(kind, key){
               `<span class="st">${esc(clip(kind === 'branch' ? r.category : r.branchCode, 18))}</span>`,
               esc(clip(r.symptom || r.detail || '—', 30)),
               ...(tech.has ? [esc(clip([r.rootCause, r.techFix].map(techText).filter(Boolean).join(' → ') || '—', 34))] : []),
-              r.hours != null ? n1(r.hours) : '<span style="color:var(--muted)">—</span>']), {maxH: 300})}
+              // counted hours, with the wall-clock gap under it whenever the two
+              // differ: the ticket is then readable both ways at a glance
+              r.hours == null ? '<span style="color:var(--muted)">—</span>'
+                : `<b class="tab">${n1(r.hours)}</b>` + (r.hoursRaw != null && Math.abs(r.hoursRaw - r.hours) > 0.1
+                  ? `<br><span style="font-size:var(--t-2xs);color:var(--muted)" title="เวลาจริงตั้งแต่แจ้งจนปิดงาน">จริง ${n1(r.hoursRaw)}</span>` : '') +
+                  (r.lateClose ? '<br><span class="chip warn" style="font-size:var(--t-2xs)">ปิดงานช้า</span>' : '')]),
+            {maxH: 300})}
         </div>
       </div>
       <div style="padding:13px 18px;border-top:1px solid var(--line);display:flex;gap:8px">
