@@ -3548,6 +3548,7 @@ const S = {
   excluded: {},          // record key -> true, left out of every calculation
   editFilter: 'all',     // quick filter on the data editor
   editQuery: '',
+  editHideExcluded: false,   // ซ่อนแถวที่ตัดออกแล้วในหน้าแก้ไขข้อมูล
   quiet: false,        // one render without the entrance animation
   notice: null,        // one-off message about the data that was just loaded
   rc: {},              // root-cause notes, per system
@@ -5127,6 +5128,51 @@ P.exec = c => {
 
 /** The quick filters, each one a class of row that is worth a second look
     before it is allowed to move a KPI. */
+/* ---- ใบงานซ้ำ -------------------------------------------------------------
+   The same fault gets reported again because whoever reported it did not check
+   whether a ticket was already open. Both tickets then carry hours for the same
+   stopped machine, so the second one double-counts. A ticket is treated as a
+   repeat REPORT (not a repeat FAILURE) when it is at the same branch, for the
+   same system, and opened while an earlier ticket was still open — or, when the
+   earlier one has no closing time to compare with, within DUP_WINDOW_H of it. */
+const DUP_WINDOW_H = 12;
+let dupMap = null, dupStamp = '';
+function dupInfo(){
+  // recomputed whenever the corrections change: an edit can move a date, a
+  // branch or a system, and any of those decides what counts as a repeat
+  const stamp = S.raw.length + '|' + Object.keys(S.edits).length + '|' + Object.keys(S.excluded).length;
+  if(dupMap && dupStamp === stamp) return dupMap;
+  const all = S.raw.map(applyEdits).filter(r => r.date);
+  const by = new Map();
+  for(const r of all){
+    const k = (r.branchCode || '?') + '||' + (r.category || '?');
+    let list = by.get(k);
+    if(!list) by.set(k, list = []);
+    list.push(r);
+  }
+  const m = new Map();
+  for(const list of by.values()){
+    const seq = list.slice().sort((a, b) =>
+      (a.startMs || Date.parse(a.date)) - (b.startMs || Date.parse(b.date)));
+    for(let i = 1; i < seq.length; i++){
+      const cur = seq[i], start = cur.startMs || Date.parse(cur.date);
+      for(let j = i - 1; j >= 0; j--){
+        const prev = seq[j], pStart = prev.startMs || Date.parse(prev.date);
+        const gapH = (start - pStart) / 3600000;
+        if(gapH > 24 * 7) break;                      // far enough apart to be a new failure
+        const stillOpen = prev.endMs != null && prev.endMs > start;
+        if(stillOpen || gapH <= DUP_WINDOW_H){
+          m.set(cur.key, {of: prev.jobNo || prev.key, gapH, open: stillOpen, date: prev.date});
+          break;
+        }
+      }
+    }
+  }
+  dupMap = m; dupStamp = stamp;
+  return m;
+}
+const isDupTicket = r => dupInfo().has(r.key);
+
 const EDIT_FILTERS = [
   ['all',      'ทั้งหมด',           () => true],
   ['nohours',  'ไม่มีชั่วโมง',       r => r.hours == null],
@@ -5137,6 +5183,7 @@ const EDIT_FILTERS = [
   ['nostop',   'ไม่ระบุว่าหยุดไหม',  r => r.stopped == null],
   ['nodate',   'ไม่มีวันที่',        r => !r.date],
   ['edited',   'ที่แก้ไขแล้ว',       r => !!S.edits[r.key]],
+  ['dup',      'ใบงานซ้ำ',          r => isDupTicket(r)],
   ['excluded', 'ที่ตัดออกแล้ว',      r => isExcluded(r)],
 ];
 const editFilterFn = id => (EDIT_FILTERS.find(f => f[0] === id) || EDIT_FILTERS[0])[2];
@@ -5151,6 +5198,8 @@ function editRows(){
   const q = S.editQuery.trim().toLowerCase();
   const rows = all.filter(r => {
     if(!pick(r)) return false;
+    // "ซ่อนที่ตัดออกแล้ว" never hides the list of what was cut
+    if(S.editHideExcluded && S.editFilter !== 'excluded' && isExcluded(r)) return false;
     if(!q) return true;
     return (r.jobNo + ' ' + r.branchCode + ' ' + r.branchName + ' ' + r.category + ' ' +
             r.detail + ' ' + r.team + ' ' + r.date).toLowerCase().includes(q);
@@ -5216,6 +5265,9 @@ P.dataedit = c => {
     </div>
     <div class="bd" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--line)">
       <span style="font-size:12.5px;color:var(--muted)">ทำกับ ${n0(rows.length)} รายการที่กรองอยู่ตอนนี้:</span>
+      <button class="btn sm${S.editHideExcluded ? ' on' : ''}" id="edHideEx"
+        title="ซ่อนรายการที่ตัดออกแล้วจากตาราง (ข้อมูลยังอยู่ กดคืนค่าได้)"
+        >${S.editHideExcluded ? '👁 กำลังซ่อนที่ตัดออก' : '🙈 ซ่อนที่ตัดออกแล้ว'}</button>
       <button class="btn sm" data-edbulk="exclude"${rows.length ? '' : ' disabled'}>✕ ตัดออกทั้งหมด</button>
       <button class="btn sm" data-edbulk="include"${rows.length ? '' : ' disabled'}>✓ นำกลับมาคิด</button>
       <span style="flex:1"></span>
@@ -5224,6 +5276,20 @@ P.dataedit = c => {
         ? '<button class="btn sm ghost" data-editreset="1">↺ คืนค่าเดิมทั้งหมด</button>' : ''}
     </div>
   </section>
+
+  ${S.editFilter === 'dup' ? (() => {
+    const d = dupInfo();
+    const dl = all.filter(r => d.has(r.key));
+    const live = dl.filter(r => !isExcluded(r));
+    const hrs = sum(live.filter(r => r.hours != null), r => r.hours);
+    const openNow = dl.filter(r => (d.get(r.key) || {}).open).length;
+    return `<div class="banner warn" style="margin-bottom:14px">
+      <span class="i">🧾</span>
+      <div><b>ใบงานซ้ำ ${n0(dl.length)} ใบ</b> — แจ้งซ้ำที่สาขาเดิม ระบบเดิม
+        ${openNow ? `โดย <b>${n0(openNow)} ใบ</b> แจ้งตอนใบเดิม<b>ยังไม่ปิด</b> · ` : ''}ที่เหลือแจ้งห่างจากใบก่อนไม่เกิน ${DUP_WINDOW_H} ชม.<br>
+        ยังนับอยู่ในผลรวม <b>${n0(live.length)} ใบ = ${hr(hrs)}</b> ซึ่งเป็นเครื่องตัวเดิมที่ถูกนับซ้ำ —
+        กด <b>✕ ตัดออกทั้งหมด</b> ด้านบนเพื่อเอาชุดนี้ออกจากทุกหน้า (กดคืนค่าเดิมได้ทีหลัง)</div></div>`;
+  })() : ''}
 
   ${S.editFilter !== 'all' || S.editQuery.trim() ? `<div class="banner info" style="margin-bottom:14px">
     <span class="i">🔎</span>
@@ -5258,11 +5324,14 @@ P.dataedit = c => {
             const flags = [];
             if(!r.date) flags.push('<span class="chip crit" title="ไม่มีวันที่ — จะไม่เข้ากราฟรายเดือน">วันที่?</span>');
             if(r.hours == null) flags.push('<span class="chip crit" title="ไม่มีชั่วโมง — นับเป็นจำนวนครั้งได้ แต่ไม่เข้ายอดชั่วโมง">ชม.?</span>');
+            const dup = dupInfo().get(r.key);
+            if(dup) flags.push(`<span class="chip warn" title="แจ้งซ้ำกับใบ ${esc(String(dup.of))} (${esc(fmtDate(dup.date))}) ห่างกัน ${n1(dup.gapH)} ชม.${dup.open ? ' — ตอนแจ้ง ใบเดิมยังไม่ปิด' : ''}">ซ้ำ ${esc(clip(String(dup.of), 12))}</span>`);
             if(r.hours != null && r.hours > 720) flags.push('<span class="chip warn" title="เกิน 1 เดือนต่อ 1 งาน">สูงผิดปกติ</span>');
             if(r.category === UNCLASSIFIED) flags.push('<span class="chip warn" title="ไม่ระบุระบบ">ระบบ?</span>');
             else if(r.categoryGuessed) flags.push('<span class="chip info" title="ระบบเดาหมวดให้จากข้อความอาการ">auto</span>');
             if(NOT_A_FAILURE.test(r.category)) flags.push('<span class="chip warn" title="ดูเหมือนบันทึกความรู้ ไม่ใช่งานซ่อม">ไม่ใช่งานซ่อม</span>');
             if(r.stopped == null) flags.push('<span class="chip info" title="ไม่ระบุว่าเครื่องหยุดไหม">หยุด?</span>');
+            if(ex) flags.unshift('<span class="chip crit" title="ไม่ถูกนำไปคิดในทุกหน้า">✕ ตัดออกแล้ว</span>');
             return `<tr${ex ? ' class="exrow"' : ''}>
               <td style="text-align:center"><input type="checkbox" data-edinc="${esc(r.key)}"${ex ? '' : ' checked'}
                 title="ติ๊ก = นำรายการนี้ไปคิดในทุกกราฟ"></td>
@@ -8999,7 +9068,14 @@ function bindGlobalEvents(){
     if(t.id === 'aAdd'){ $('file').click(); return; }
     if(t.id === 'aNew'){ openGate(); return; }
     if(t.id === 'gateClose' || t.id === 'gateBack'){ if(S.raw.length) closeGate(); return; }
+    if(t.id === 'edHideEx'){ S.editHideExcluded = !S.editHideExcluded; render(); return; }
     if(t.id === 'undoDel'){ undoRemove(); return; }
+    if(t.id === 'undoExc'){
+      const k = t.dataset.k;
+      if(S.excluded[k]) delete S.excluded[k]; else S.excluded[k] = 1;
+      saveEdits(); $('toast').hidden = true; render();
+      return;
+    }
     const bs = t.closest('[data-brand]');
     if(bs){
       const v = bs.dataset.brand;
@@ -9187,8 +9263,17 @@ function bindGlobalEvents(){
     const inc = t.closest('[data-edinc]');
     if(inc){
       const k = inc.dataset.edinc;
+      const rec = S.raw.map(applyEdits).find(r => r.key === k);
       if(inc.checked) delete S.excluded[k]; else S.excluded[k] = 1;
       saveEdits();
+      /* Cutting a row leaves it on screen on purpose (greyed, so it can be put
+         back), and a ticket with no hours moves no total — which together made
+         it look like nothing happened. Say what happened, with the way back. */
+      const cut = !inc.checked;
+      toast(`${cut ? '✕ ตัดใบงาน' : '✓ เอากลับมาคิด'} <b>${esc((rec && rec.jobNo) || k)}</b>` +
+        (rec && rec.hours != null ? ` · ${cut ? '−' : '+'}${hr(rec.hours)}` : ' · ใบนี้ไม่มีชั่วโมง ตัวเลขชั่วโมงจึงไม่เปลี่ยน') +
+        ` · รวมตัดออกแล้ว ${n0(Object.keys(S.excluded).length)} รายการ` +
+        `<button class="btn sm" id="undoExc" data-k="${esc(k)}" style="margin-left:8px">↩ เลิกทำ</button>`, 14000);
       // the value sits inside quotes in the selector, so only \ and " need escaping
       renderEditor('[data-edinc="' + k.replace(/["\\]/g, '\\$&') + '"]');
       return;
