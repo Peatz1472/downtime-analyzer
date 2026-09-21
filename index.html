@@ -931,6 +931,31 @@ function bizDowntime(startMs,endMs){
   return total>cap?{hours:cap,capped:true,spanDays}:{hours:total,capped:false,spanDays};
 }
 
+/* ---- availability: when the shop was supposed to be open ------------------
+   A machine that breaks at 21:00 and is running again at 22:00 cost QW nothing:
+   the shop was shut. WAG never shuts, so for it this clips nothing. This is the
+   downtime that belongs in %uptime, and it is NOT the same number as the one
+   the team is measured on (that one counts only technician hours) — two
+   different questions, kept as two different fields. */
+const OPEN_HOURS = {QW: {from: 8, to: 20}, WAG: {from: 0, to: 24}, OTHER: {from: 8, to: 20}};
+const openWindow = brand => OPEN_HOURS[brand] || OPEN_HOURS.OTHER;
+const openHoursPerDay = brand => { const w = openWindow(brand); return w.to - w.from; };
+function openDowntime(startMs, endMs, brand){
+  if(startMs==null||endMs==null||endMs<startMs) return null;
+  const w = openWindow(brand);
+  const cap = BIZ.capDays * (w.to - w.from);
+  if((endMs-startMs)/DAY_MS_ > 400) return cap;
+  let total = 0;
+  const last = Date.parse(dayOf(endMs)+'T00:00:00Z');
+  for(let d = Date.parse(dayOf(startMs)+'T00:00:00Z'); d <= last; d += DAY_MS_){
+    const k = dayOf(d);
+    const lo = Math.max(startMs, atHour(k, w.from));
+    const hi = Math.min(endMs, w.to >= 24 ? Date.parse(k+'T00:00:00Z')+DAY_MS_ : atHour(k, w.to));
+    if(hi > lo) total += (hi-lo)/3600000;
+  }
+  return Math.min(total, cap);
+}
+
 function parseTime(s){
   if(!s) return null;
   let t=String(s).trim(); if(!t) return null;
@@ -1114,6 +1139,8 @@ function buildRecords(grid,sourceName,brandHint){
       // the wall-clock gap, kept beside the counted hours so a ticket can always
       // be read both ways — and so "ปิดงานช้า" can show what it really was
       hoursRaw:rawHours,lateClose:!!(biz&&biz.capped),spanDays:biz?biz.spanDays:null,
+      // downtime inside the shop's own opening hours — the numerator of %uptime
+      hoursOpen:openDowntime(startMs,endMs,b.brand),
       durCol:durCol,
       hoursCol:at(r,'hoursCol'),
     });
@@ -3530,6 +3557,7 @@ const dimLabel = () => (DIMS.find(d => d[0] === S.dim) || DIMS[0])[1];
 const PAGES = [
   {id:'overview',  ic:'🏠', name:'ภาพรวม',           grp:'สถานการณ์'},
   {id:'problems',  ic:'🔥', name:'ปัญหาหลัก',         grp:'สถานการณ์'},
+  {id:'uptime',    ic:'🟢', name:'%Uptime',          grp:'สถานการณ์'},
   {id:'weekly',    ic:'📅', name:'รายสัปดาห์',        grp:'สถานการณ์'},
   {id:'pareto',    ic:'📊', name:'Pareto คู่',        grp:'วิเคราะห์'},
   {id:'priority',  ic:'🎯', name:'Priority Matrix',   grp:'วิเคราะห์'},
@@ -3661,9 +3689,11 @@ P.overview = c => {
      same per-system comparison the Problems page draws, summarised here. */
   const mv = monthCompare(c.measureRecs, per);
   const mvBy = new Map(mv.map(r => [r.key, r]));
+  // the same question asked of branches: which sites got better, which worse
+  const mvBranch = new Map(monthCompare(c.measureRecs, per, r => r.branchCode).map(r => [r.key, r]));
   const better = mv.filter(r => r.delta < -0.05), worse = mv.filter(r => r.delta > 0.05);
-  const movedLine = r => {
-    const m = mvBy.get(r.key);
+  const movedLine = (r, map) => {
+    const m = (map || mvBy).get(r.key);
     // a top problem can be a big number that is not happening any more: say so
     // rather than leaving the row silent
     if(!m) return `<span style="color:var(--muted)">— ไม่มีทั้งในเดือนนี้และเดือนที่เทียบ</span>`;
@@ -3820,9 +3850,11 @@ P.overview = c => {
             <span style="text-align:right;flex:0 0 auto">
               <b class="tab" style="font-size:14.5px">${n1(b.hours)}</b>
               <span style="font-size:12px;color:var(--muted)"> ชม.</span>
-              <span class="chip ${LEVEL_TONE[b.level]}" style="display:block;margin-top:3px">${b.level}</span></span>
+              <span class="chip ${LEVEL_TONE[b.level]}" style="display:block;margin-top:3px">${b.level}</span>
+              <span style="display:block;font-size:11.5px;font-weight:650;margin-top:3px">${
+                movedLine({key: b.branch}, mvBranch)}</span></span>
           </button>`).join('') || '<p class="empty"><b>ยังไม่มีข้อมูล</b></p>'}
-      </div>`, 'เรียงตาม Risk Score')}
+      </div>`, `เรียงตาม Risk Score · บรรทัดล่างคือเทียบ${esc(per.baseName)}`)}
 
     ${bare('🔁 ปัญหาเกิดซ้ำ (Repeat Failure)',
       `<div class="bd">
@@ -4300,6 +4332,92 @@ function monthCompare(recs, p, keyFn){
   return [...m.values()].map(g => ({...g, delta: g.cur - g.base,
     chg: g.base > 0 ? (g.cur - g.base) / g.base * 100 : (g.cur > 0 ? null : 0)}))
     .sort((a, b) => a.delta - b.delta);
+}
+
+/* ---- %uptime -------------------------------------------------------------
+   (เวลาที่ควรเปิดทั้งหมด − downtime ในเวลาเปิด) ÷ เวลาที่ควรเปิดทั้งหมด × 100
+   Capacity is per brand, because the two brands do not keep the same hours:
+   QW is open 12 h a day, WAG runs 24. A branch with no tickets in the month was
+   up for all of it and belongs in the denominator, so the branch count comes
+   from the whole database rather than from the month being measured. */
+const UPTIME_TARGET = 97.92;
+
+/** brand -> how many branches that brand has in the data at all */
+function branchUniverse(recs){
+  const m = new Map();
+  for(const r of recs){
+    if(!r.brand || !r.branchCode) continue;
+    let set = m.get(r.brand);
+    if(!set) m.set(r.brand, set = new Set());
+    set.add(r.branchCode);
+  }
+  return m;
+}
+
+/** `months` is the list being measured; `dayCap` optionally shortens the last
+    one (the month in progress is only as long as the data in it). */
+function uptimeOf(recs, months, universe, dayCap){
+  const list = [...months];
+  const rows = [];
+  for(const [brand, set] of universe){
+    const perDay = openHoursPerDay(brand);
+    const days = sum(list, m => (dayCap && m === list[list.length - 1]) ? dayCap : daysIn(m));
+    const capacity = perDay * days * set.size;
+    const down = sum(recs.filter(r => r.brand === brand && list.includes(r.month)),
+      r => r.hoursOpen || 0);
+    if(!capacity) continue;
+    rows.push({brand, branches: set.size, perDay, days, capacity, down,
+      pct: (capacity - down) / capacity * 100,
+      budget: capacity * (100 - UPTIME_TARGET) / 100});
+  }
+  const capacity = sum(rows, r => r.capacity), down = sum(rows, r => r.down);
+  return {rows: rows.sort((a, b) => a.brand.localeCompare(b.brand)),
+    capacity, down, pct: capacity ? (capacity - down) / capacity * 100 : null,
+    budget: capacity * (100 - UPTIME_TARGET) / 100,
+    target: UPTIME_TARGET};
+}
+
+/** The card: one number, the target beside it, and what the gap is in hours —
+    a percentage nobody can convert into hours is a percentage nobody acts on. */
+function uptimeCard(u, label, partialNote){
+  if(!u || u.pct == null) return '';
+  const okNow = u.pct >= u.target;
+  const gapH = u.down - u.budget;
+  return bare(`🟢 %Uptime ${esc(label)}`,
+    `<div class="bd">
+      <div style="display:flex;align-items:baseline;gap:clamp(12px,3vw,32px);flex-wrap:wrap">
+        <div>
+          <div class="heroNum tab" style="font-size:clamp(34px,7vw,56px);color:var(--${okNow ? 'good' : 'crit'}-ink)">
+            <span data-count="${u.pct}" data-dp="2">0</span><small style="font-size:.45em">%</small></div>
+          <div class="eyebrow" style="margin-top:4px">เป้า ${u.target.toFixed(2)}%</div>
+        </div>
+        <div style="flex:1;min-width:240px">
+          <div class="track" style="height:14px">
+            <i data-pct="${Math.max(0, Math.min(100, (u.pct - 95) / 5 * 100))}"
+               style="background:${okNow ? 'var(--good)' : 'var(--crit)'}"></i></div>
+          <p style="font-size:var(--t-xs);color:var(--muted);margin-top:7px">
+            เวลาที่ควรเปิดทั้งหมด <b class="tab">${n0(u.capacity)}</b> ชม. ·
+            เสียไป <b class="tab">${n1(u.down)}</b> ชม. ·
+            โควตาที่ยอมได้ <b class="tab">${n1(u.budget)}</b> ชม.</p>
+          <p style="font-size:var(--t-sm);font-weight:700;margin-top:6px;
+             color:var(--${okNow ? 'good' : 'crit'}-ink)">${okNow
+            ? `🎯 ถึงเป้าแล้ว — ยังเหลือโควตาอีก ${hr(Math.abs(gapH))}`
+            : `⚠ ต่ำกว่าเป้า — เสียเกินโควตา ${hr(gapH)}`}</p>
+        </div>
+      </div>
+      ${u.rows.length > 1 ? `<div class="grid g2" style="gap:9px;margin-top:12px">
+        ${u.rows.map(r => `<div style="background:var(--surface2);border-radius:11px;padding:10px 12px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <b style="font-size:var(--t-sm)">${esc(r.brand)}</b>
+            <b class="tab" style="font-size:19px;color:var(--${r.pct >= u.target ? 'good' : 'crit'}-ink)">${n1(r.pct)}%</b></div>
+          <p style="font-size:var(--t-2xs);color:var(--muted);margin-top:3px">
+            ${n0(r.branches)} สาขา × ${n0(r.perDay)} ชม./วัน × ${n0(r.days)} วัน = ${n0(r.capacity)} ชม. ·
+            เสียไป ${n1(r.down)} ชม.</p></div>`).join('')}
+      </div>` : ''}
+      <p style="font-size:var(--t-2xs);color:var(--muted);margin-top:10px">
+        นับ downtime เฉพาะช่วงที่ร้านเปิด (QW 08:00–20:00 · WAG 24 ชม.) ซึ่งต่างจากชั่วโมงที่ใช้วัดงานช่าง (09:00–18:00) ·
+        สาขาที่ไม่มีใบงานในเดือนนั้นถือว่าเปิดได้เต็มเวลา และถูกนับในตัวหารด้วย${partialNote || ''}</p>
+    </div>`, 'เวลาที่ควรเปิดทั้งหมด − ชั่วโมงที่เครื่องเสียตอนร้านเปิด ÷ เวลาที่ควรเปิดทั้งหมด');
 }
 
 /** The last few months side by side, each against the month before it — the
@@ -6904,6 +7022,143 @@ P.weekly = c => {
           : 'ตอนนี้ไม่ได้กรองเดือน จึงแสดง 13 สัปดาห์ล่าสุด'}</li>
       <li>สัปดาห์แรกที่แสดงยังเทียบกับสัปดาห์ก่อนหน้าได้ เพราะระบบคำนวณสัปดาห์นั้นไว้ด้วย
         แม้จะอยู่นอกช่วงที่กรอง</li>
+    </ul>
+  </div>`;
+};
+
+/* ==========================================================================
+   14g. 🟢 %Uptime — the number the company is actually held to
+   Uptime (%) = (เวลาที่ควรเปิดทั้งหมด − Downtime รวม) ÷ เวลาที่ควรเปิดทั้งหมด × 100
+   QW is open 12 h a day, WAG runs 24, and both are held to 97.92%. The
+   downtime that belongs here is the downtime that happened while the shop was
+   OPEN — which is not the same number the team's own work is measured with
+   (that one counts only the 09:00–18:00 a technician can work), so the two
+   live side by side and this page says which is which.
+   A branch with no tickets in a month was up for all of it: it is in the
+   denominator, never missing from it.
+   ========================================================================== */
+
+/** Uptime per month, newest last — the series the trend and table both read. */
+function uptimeSeries(recs, months, uni, p){
+  return months.map(m => {
+    const dayCap = (p && p.curPartial && m === p.curMonth) ? p.curDay : 0;
+    const u = uptimeOf(recs, [m], uni, dayCap);
+    return {month: m, label: monthLabel(m), pct: u.pct, down: u.down,
+      capacity: u.capacity, budget: u.budget, partial: !!dayCap};
+  }).filter(x => x.capacity > 0);
+}
+
+/** Availability lost per branch: the same arithmetic, one branch at a time. */
+function uptimeByBranch(recs, months, p){
+  const days = m => (p && p.curPartial && m === p.curMonth) ? p.curDay : daysIn(m);
+  const total = sum(months, days);
+  const m = new Map();
+  for(const r of recs){
+    if(!months.includes(r.month) || !r.branchCode) continue;
+    let g = m.get(r.branchCode);
+    if(!g) m.set(r.branchCode, g = {code: r.branchCode, name: r.branchName || r.branchCode,
+      brand: r.brand, down: 0, count: 0});
+    g.down += r.hoursOpen || 0;
+    g.count++;
+  }
+  return [...m.values()].map(g => {
+    const capacity = openHoursPerDay(g.brand) * total;
+    return {...g, capacity, pct: capacity ? (capacity - g.down) / capacity * 100 : null,
+      budget: capacity * (100 - UPTIME_TARGET) / 100};
+  }).sort((a, b) => a.pct - b.pct);
+}
+
+P.uptime = c => {
+  const per = c.per;
+  const uni = branchUniverse(c.measureRecs);
+  const months = per.axis.filter(m => m <= per.curMonth);
+  const cur = uptimeOf(c.measureRecs, [per.curMonth], uni, per.curPartial ? per.curDay : 0);
+  const series = uptimeSeries(c.measureRecs, months.slice(-12), uni, per);
+  const branches = uptimeByBranch(c.measureRecs, [per.curMonth], per);
+  const worst = branches.filter(b => b.down > 0.05).slice(0, 12);
+  // every branch of the brand counts, including the ones with no ticket at all:
+  // those were up the whole month and are already in the denominator
+  const fleetN = sum([...uni.values()], set => set.size);
+  const perfect = Math.max(0, fleetN - branches.filter(b => b.down > 0.05).length);
+
+  if(!cur || cur.pct == null) return `<div class="ph reveal"><div class="k">🟢 Uptime</div>
+    <h1>%Uptime ของทั้งกลุ่ม</h1></div><p class="empty"><b>ยังไม่มีข้อมูลพอจะคิด</b></p>`;
+
+  const lo = Math.min(95, ...series.map(s => s.pct)) - 0.2;
+  const bar = s => {
+    const ok = s.pct >= UPTIME_TARGET;
+    const h = Math.max(2, (s.pct - lo) / (100 - lo) * 150);
+    return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:3px;min-width:0"
+        title="${esc(s.label)}: ${n1(s.pct)}% · เสีย ${esc(hr(s.down))} จาก ${n0(s.capacity)} ชม.${s.partial ? ' (ยังไม่จบเดือน)' : ''}">
+      <span class="tab" style="font-size:var(--t-2xs);color:var(--muted)">${n1(s.pct)}</span>
+      <i style="display:block;width:100%;max-width:44px;border-radius:5px 5px 0 0;height:${h}px;
+        background:${ok ? 'var(--good)' : 'var(--crit)'};${s.partial ? 'opacity:.55;' : ''}"></i>
+      <span style="font-size:var(--t-2xs);color:var(--muted);white-space:nowrap;overflow:hidden;
+        text-overflow:ellipsis;max-width:100%">${esc(s.label.replace(/ \S+$/, ''))}</span>
+    </div>`;
+  };
+
+  return `
+  <div class="ph reveal">
+    <div class="k">🟢 Uptime</div>
+    <h1>เครื่องพร้อมใช้งานกี่ % ของเวลาที่ควรเปิด</h1>
+    <p>Uptime (%) = (เวลาที่ควรเปิดทั้งหมด − Downtime รวม) ÷ เวลาที่ควรเปิดทั้งหมด × 100 ·
+       เป้าทั้งสองแบรนด์ <b>${UPTIME_TARGET.toFixed(2)}%</b></p>
+  </div>
+
+  ${editBanner(c)}
+  ${runningNote(per)}
+
+  ${uptimeCard(cur, 'เดือน ' + monthLabel(per.curMonth), per.curPartial
+    ? ` · เดือนนี้ยังไม่จบ จึงคิดเวลาที่ควรเปิดแค่ ${per.curDay} วันแรก` : '')}
+
+  <div style="height:14px"></div>
+
+  ${bare(`${n0(series.length)} เดือนล่าสุด`,
+    `<div class="bd">
+      <div style="display:flex;align-items:flex-end;gap:6px;height:180px">${series.map(bar).join('')}</div>
+      <p style="font-size:var(--t-xs);color:var(--muted);margin-top:10px">
+        <i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--good)"></i> ถึงเป้า ${UPTIME_TARGET.toFixed(2)}% ·
+        <i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--crit)"></i> ต่ำกว่าเป้า ·
+        แท่งจาง = เดือนที่ยังไม่จบ · แกนเริ่มที่ ${n1(lo)}% เพื่อให้เห็นความต่าง</p>
+    </div>`, 'เดือนไหนหลุดเป้า เห็นทันที')}
+
+  <div style="height:14px"></div>
+
+  ${card('สาขาที่ทำให้ uptime หลุดเป้ามากที่สุด — เดือน ' + monthLabel(per.curMonth),
+    worst.length ? tableHTML(
+      [{h:'สาขา'}, {h:'แบรนด์'}, {h:'Uptime', num:1}, {h:'เสียไป (ชม.)', num:1},
+       {h:'โควตาที่ยอมได้', num:1}, {h:'เกินโควตา', num:1}, {h:'ใบงาน', num:1}, {h:'สถานะ'}],
+      worst.map(b => {
+        const over = b.down - b.budget;
+        return [
+          `<b data-drill="branch" data-key="${esc(b.code)}" style="cursor:pointer">${esc(clip(b.name, 26))}</b>`,
+          esc(b.brand || '—'),
+          `<b class="tab" style="color:var(--${b.pct >= UPTIME_TARGET ? 'good' : 'crit'}-ink)">${n1(b.pct)}%</b>`,
+          n1(b.down), n1(b.budget),
+          over > 0 ? `<b class="tab" style="color:var(--crit-ink)">+${n1(over)}</b>` : '<span style="color:var(--muted)">—</span>',
+          n0(b.count),
+          b.pct >= UPTIME_TARGET ? '<span class="chip good">ถึงเป้า</span>' : '<span class="chip crit">หลุดเป้า</span>',
+        ];
+      }), {maxH: 460})
+      : '<p class="empty"><b>ไม่มีสาขาไหนเสียเวลาเลยในเดือนนี้</b></p>',
+    `อีก ${n0(perfect)} สาขาไม่มีเครื่องเสียเลยในเดือนนี้ — นับเป็น 100% และอยู่ในตัวหารด้วย · กดชื่อสาขาเพื่อเจาะดู`)}
+
+  <div style="height:14px"></div>
+
+  <div class="card" style="padding:15px 17px">
+    <p class="eyebrow" style="margin-bottom:7px">คิดมาจากอะไร</p>
+    <ul style="font-size:var(--t-sm);color:var(--ink2);line-height:1.95;padding-left:18px">
+      <li><b>เวลาที่ควรเปิดทั้งหมด</b> = ชั่วโมงเปิดต่อวัน × จำนวนวัน × จำนวนสาขาของแบรนด์นั้น
+        ${cur.rows.map(r => `<br><span style="color:var(--muted)">${esc(r.brand)}: ${n0(r.perDay)} ชม./วัน × ${n0(r.days)} วัน × ${n0(r.branches)} สาขา = <b class="tab">${n0(r.capacity)}</b> ชม.</span>`).join('')}</li>
+      <li><b>Downtime รวม</b> = ชั่วโมงที่เครื่องเสีย<b>เฉพาะช่วงที่ร้านเปิด</b> —
+        QW 08:00–20:00 · WAG ตลอด 24 ชม. (เสียตอนร้านปิดไม่นับ เพราะลูกค้าใช้ไม่ได้อยู่แล้ว)</li>
+      <li>ต่างจากชั่วโมงที่ใช้วัดงานช่างในหน้าอื่น ซึ่งนับเฉพาะ ${BIZ.open}:00–${BIZ.close}:00 ที่ช่างทำงานได้ —
+        คนละคำถามกัน จึงเป็นคนละตัวเลข</li>
+      <li>เป้า ${UPTIME_TARGET.toFixed(2)}% แปลว่ายอมให้เสียได้ <b class="tab">${n1(100 - UPTIME_TARGET)}%</b> ของเวลาที่ควรเปิด
+        = <b class="tab">${n1(cur.budget)}</b> ชม. ในเดือนนี้ทั้งกลุ่ม</li>
+      <li>ใบงานที่เปิดค้างเกิน ${BIZ.capDays} วันทำการ ถูกตัดเพดานเหมือนกับหน้าอื่น เพื่อไม่ให้ “ลืมปิดงาน”
+        กลายเป็น uptime ที่ดูแย่เกินจริง</li>
     </ul>
   </div>`;
 };
