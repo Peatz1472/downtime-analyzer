@@ -2431,8 +2431,25 @@ function pendingDataNote(){
         ฐานข้อมูลจะเป็น <b>${n0(publishedRows)} → ${n0(S.raw.length)}</b> ใบงาน
         ${grew > 0 ? '(<b>+' + n0(grew) + '</b> ใบใหม่)' : '(เลขที่งานซ้ำ ใช้ค่าจากไฟล์ใหม่)'} ·
         <b>ของเก่าไม่หาย</b> รวมกันตามเลขที่งาน</p>
+      ${(() => {
+        /* Saving from the published page needs a GitHub token in THIS browser.
+           Nobody had ever managed a save from the web — every monthly file
+           added there was lost on the next refresh — so the requirement is
+           stated here, before the work is lost, not inside the dialog. */
+        const months = uniq(add.flatMap(s => S.raw.filter(r => r.source === s.name).map(r => r.month)))
+          .filter(Boolean).sort();
+        const need = deployMode() === 'web' && !ghToken();
+        return `<p style="margin-top:4px;font-size:var(--t-xs);color:var(--muted);line-height:var(--lh-body)">
+          ${months.length ? 'เดือนที่เข้ามาใหม่: <b>' + months.map(m => esc(monthLabel(m))).join(' · ') + '</b><br>' : ''}
+          ${need ? `<b style="color:var(--warn-ink)">เบราว์เซอร์นี้ยังไม่ได้ใส่ GitHub token</b> —
+            ต้องใส่ครั้งเดียวตอนกดบันทึก ไม่งั้นบันทึกลงฐานข้อมูลกลางไม่ได้
+            (ถ้ายังไม่มี ให้กด “สำรองเป็นไฟล์” ไว้ก่อน จะได้ไม่หาย)`
+            : 'กดบันทึกแล้วทุกคนที่เปิดเว็บจะเห็นชุดนี้'}</p>`;
+      })()}
       <div style="display:flex;gap:7px;margin-top:8px;flex-wrap:wrap">
         <button class="btn sm primary" id="pendDeploy">🚀 บันทึกลงฐานข้อมูล</button>
+        <button class="btn sm" id="pendBackup"
+          title="ดาวน์โหลดทุกอย่างในแท็บนี้เป็นไฟล์เดียว — กู้กลับได้แม้ปิดแท็บไปแล้ว">📥 สำรองเป็นไฟล์</button>
         <button class="btn sm ghost" id="pendDrop">ทิ้งไฟล์ที่เพิ่งมา</button>
       </div>
     </div>
@@ -3089,6 +3106,16 @@ const setPublishedRows = n => { publishedRows = n; };
 const unsavedAdds = () => (lockOn() ? S.sources.filter(s => s.dirty) : []);
 const clearUnsaved = () => { S.sources.forEach(s => { delete s.dirty; }); };
 
+/** The two exports baked into this file ARE the database: QW and WAG from
+    `datateh/`. They are permanent in every copy — the published site and the
+    local HTML alike — no ✕, no way to unmark them: they are what every monthly
+    file merges onto, and a hole punched in them cannot be fetched back from
+    anyone's disk. `core` is stamped only by the baked-in baseline, so a file
+    added by hand stays removable even after it is saved and even if it becomes
+    the baseline for its brand. To change the database itself, rebuild the file
+    (`node make-base.mjs <folder>` → `node build.mjs`). */
+const locked = s => !!s.core && s.kind !== ROSTER_KIND;
+
 /** Where the last save actually landed — shown to the user, because "your data
     is saved" is a promise the app has to be able to back up. */
 let storeWhere = null;
@@ -3103,8 +3130,11 @@ function datasetPayload(){
     // the last file would fall back to the baked-in baseline on the next open
     // and the deletion would appear to undo itself.
     cleared: usable.length === 0,
+    // `core` travels with the set: a monthly file added later stays removable
+    // after it is saved, while the two exports the database was built from do
+    // not — otherwise every file ever added would become permanent
     sources: usable.map(s => ({name: s.name, hint: s.hint || null, at: s.at || Date.now(),
-      base: !!s.base, kind: s.kind || null, prev: s.prev || null, grid: s.grid})),
+      base: !!s.base, core: !!s.core, kind: s.kind || null, prev: s.prev || null, grid: s.grid})),
   };
 }
 async function datasetB64(){
@@ -3175,7 +3205,15 @@ async function loadBaseDataset(){
   try {
     const d = JSON.parse(await inflateStr(b64dec(baseDataB64())));
     if(!d || !Array.isArray(d.sources) || !d.sources.length) return null;
-    d.sources = d.sources.map(s => Object.assign({}, s, {base: true}));
+    /* A source out of the baked-in payload IS the database, so it is core
+       unless it says otherwise: on the published copy a monthly file added
+       and deployed travels in this same payload, and it must stay removable.
+       Payloads made before the flag existed carry neither key and default to
+       locked, which is what they were. */
+    d.sources = d.sources.map(s => {
+      const baked = s.core !== false;      // older payloads carry no flag at all
+      return Object.assign({}, s, {core: baked, base: baked ? true : !!s.base});
+    });
     d.fromBase = true;
     return d;
   } catch(e){ return null; }
@@ -3195,6 +3233,10 @@ function rebuildFromSources(){
     if(s.kind === ROSTER_KIND){ s.rows = 0; continue; }
     const {recs, issues, mapping, unmapped} = buildRecords(s.grid, s.name, s.hint);
     s.rows = recs.length;
+    // how many of this sheet's tickets updated one an earlier file already had:
+    // a monthly export repeats the month before it, and "ชุดข้อมูล" says so
+    // instead of leaving the user to wonder where the rows went
+    s.merged = 0;
     s.unmapped = unmapped;
     s.missing = REQUIRED.filter(([k]) => mapping[k] < 0).map(([, l]) => l);
     // which header, if any, fed each technician column — shown on Data Quality
@@ -3203,7 +3245,7 @@ function rebuildFromSources(){
     S.issues.push(...issues);
     for(const r of recs){
       const job = String(r.jobNo || '').trim();
-      if(job && seen.has(job)){ S.raw[seen.get(job)] = r; replaced++; }
+      if(job && seen.has(job)){ S.raw[seen.get(job)] = r; replaced++; s.merged++; }
       else { if(job) seen.set(job, S.raw.length); S.raw.push(r); }
     }
   }
@@ -3305,6 +3347,7 @@ const dimLabel = () => (DIMS.find(d => d[0] === S.dim) || DIMS[0])[1];
 const PAGES = [
   {id:'overview',  ic:'🏠', name:'ภาพรวม',           grp:'สถานการณ์'},
   {id:'problems',  ic:'🔥', name:'ปัญหาหลัก',         grp:'สถานการณ์'},
+  {id:'weekly',    ic:'📅', name:'รายสัปดาห์',        grp:'สถานการณ์'},
   {id:'pareto',    ic:'📊', name:'Pareto คู่',        grp:'วิเคราะห์'},
   {id:'priority',  ic:'🎯', name:'Priority Matrix',   grp:'วิเคราะห์'},
   {id:'repeat',    ic:'🔁', name:'ปัญหาเกิดซ้ำ',      grp:'วิเคราะห์'},
@@ -3313,6 +3356,7 @@ const PAGES = [
   {id:'rootcause', ic:'🧠', name:'Root Cause Flow',   grp:'ลงมือทำ'},
   {id:'saving',    ic:'💰', name:'Saving Simulator',  grp:'ลงมือทำ'},
   {id:'action',    ic:'🛠', name:'Action Plan',       grp:'ลงมือทำ'},
+  {id:'dataset',   ic:'🗄', name:'ชุดข้อมูล',          grp:'ตรวจสอบ'},
   {id:'dataedit',  ic:'🗂', name:'แก้ไขข้อมูล',        grp:'ตรวจสอบ'},
   {id:'quality',   ic:'❤️', name:'Data Quality',      grp:'ตรวจสอบ'},
   {id:'exec',      ic:'📑', name:'Executive Report',  grp:'ตรวจสอบ'},
@@ -3336,11 +3380,12 @@ function ctx(){
 
   const o = overview(recs);
   // "ตอนนี้" is a month and the base is chosen — never the all-time average
-  const per = PER = period(kept, recs);
-  const {base, tgt, need} = per;
   // an action is measured across its whole history, whatever month range the
-  // bar happens to be narrowed to — a "from" filter must not erase its "before"
+  // bar happens to be narrowed to — a "from" filter must not erase its "before",
+  // and neither must it erase the month the base is taken from
   const measureRecs = applyFilters(kept, Object.assign({}, S.f, {from: '', to: ''}));
+  const per = PER = period(kept, measureRecs);
+  const {base, tgt, need} = per;
   const groups = groupBy(recs, dimFn());
   const byHours = pareto(groups, 'hours');
   const byCount = pareto(groups, 'count');
@@ -3445,22 +3490,32 @@ P.overview = c => {
   </div>
 
   ${editBanner(c)}
+  ${runningNote(per)}
   ${coverageBanner(c)}
 
   <div class="grid g5" style="margin-bottom:${note ? 8 : 14}px">
     ${kpiCard({label:`Downtime เดือน ${curL}`, raw:cur, dp:1, unit:'ชม.',
-      sub:`${n0(per.curCount)} ใบงาน${per.curPartial ? ' · <b style="color:var(--warn-ink)">ยังไม่จบเดือน</b>' : ''}`,
-      tone: per.curPartial ? 'warn' : 'info', d:1})}
+      sub:`${n0(per.curCount)} ใบงาน${per.curPartial ? ' · <b style="color:var(--warn-ink)">ยังไม่จบเดือน</b>' : ''}` +
+        (onTarget ? '' : ' · <b style="color:var(--crit-ink)">เกินเป้า</b>'),
+      // over the target is red wherever the number appears: a month that beat
+      // last month but is still above target must not read as green anywhere
+      tone: onTarget ? (per.curPartial ? 'warn' : 'info') : 'crit', d:1})}
     ${kpiCard({label:'ฐานที่ใช้เทียบ', raw:base, dp:1, unit:'ชม./เดือน',
       sub: esc(per.baseName), tone:'warn', d:2})}
     ${kpiCard({label:'เปลี่ยนแปลงจากฐาน', value: signPct(chg), unit:'',
       sub: chg == null ? 'ยังไม่มีเดือนก่อนหน้าให้เทียบ'
         : `${chg <= 0 ? '▼ ลดลง' : '▲ เพิ่มขึ้น'} ${hr(Math.abs(per.delta))}`,
       tone: tone || 'info', d:3})}
-    ${kpiCard({label:'เป้าหมาย (Target)', raw:tgt, dp:1, unit:'ชม./เดือน',
-      sub:`ลด ${S.targetPct}% จากฐาน ${n1(base)} ชม.`, tone:'good', d:4})}
-    ${kpiCard({label:'ส่วนต่างที่ต้องลด (Gap)', raw:gap, dp:1, unit:'ชม./เดือน',
-      sub: onTarget ? '🎉 ถึงเป้าหมายแล้ว' : `↓ ต้องลดอีกเท่านี้ในเดือน ${curL}`,
+    ${kpiCard({label: per.curPartial ? `เป้าถึงวันที่ ${per.curDay}` : 'เป้าหมาย (Target)',
+      raw: per.curPartial ? per.tgtToDate : tgt, dp:1, unit: per.curPartial ? 'ชม.' : 'ชม./เดือน',
+      sub: per.curPartial
+        ? `${per.curDay}/${per.curDays} วันของเป้าทั้งเดือน ${n1(tgt)} ชม. (ลด ${S.targetPct}% จากฐาน)`
+        : `ลด ${S.targetPct}% จากฐาน ${n1(base)} ชม.`, tone:'info', d:4})}
+    ${kpiCard({label:'ส่วนต่างที่ต้องลด (Gap)', raw:gap, dp:1, unit: per.curPartial ? 'ชม.' : 'ชม./เดือน',
+      sub: onTarget
+        ? (per.curPartial ? `🎉 ตามเป้าอยู่ (ถึงวันที่ ${per.curDay})` : '🎉 ถึงเป้าหมายแล้ว')
+        : (per.curPartial ? `↓ เกินเป้าของช่วง 1–${per.curDay} ${curL} แล้วเท่านี้`
+                          : `↓ ต้องลดอีกเท่านี้ในเดือน ${curL}`),
       tone: onTarget ? 'good' : 'crit', pct: progress, d:5})}
   </div>
   ${note ? `<p class="reveal" style="font-size:var(--t-xs);color:var(--muted);margin:0 0 14px">${note}</p>` : ''}
@@ -3470,25 +3525,31 @@ P.overview = c => {
       <p class="eyebrow">ภารกิจของเรา — เดือน ${esc(curL)} เทียบกับ${esc(per.baseName)}</p>
       <div style="display:flex;align-items:center;gap:clamp(14px,4vw,44px);flex-wrap:wrap;margin-top:12px">
         <div>
-          <div class="heroNum tab" style="color:${tone === 'good' ? 'var(--good-ink)' : 'var(--crit-ink)'}"><span data-count="${cur}" data-dp="1">0</span></div>
+          <div class="heroNum tab" style="color:${onTarget ? 'var(--good-ink)' : 'var(--crit-ink)'}"><span data-count="${cur}" data-dp="1">0</span></div>
           <div class="eyebrow" style="margin-top:6px">เดือน ${esc(curL)} (ชม.)</div>
         </div>
         <div class="heroArrow">→</div>
         <div>
-          <div class="heroNum tab" style="color:var(--good-ink)"><span data-count="${tgt}" data-dp="1">0</span></div>
-          <div class="eyebrow" style="margin-top:6px">เป้าหมาย (ชม./เดือน)</div>
+          <div class="heroNum tab" style="color:var(--ink2)"><span data-count="${per.curPartial ? per.tgtToDate : tgt}" data-dp="1">0</span></div>
+          <div class="eyebrow" style="margin-top:6px">${per.curPartial
+            ? `เป้าถึงวันที่ ${per.curDay} (ชม.)` : 'เป้าหมาย (ชม./เดือน)'}</div>
         </div>
         <div style="flex:1;min-width:230px">
           <div class="track" style="height:18px">
-            <i data-pct="${Math.min(100, progress)}" style="background:linear-gradient(90deg,var(--warn),var(--good))"></i>
+            <i data-pct="${Math.min(100, progress)}" style="background:${onTarget
+              ? 'linear-gradient(90deg,var(--warn),var(--good))'
+              : 'linear-gradient(90deg,var(--orange),var(--crit))'}"></i>
           </div>
           <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:12.5px;color:var(--muted)">
             <span class="tab">ฐาน ${n1(base)}</span><span class="tab">เป้า ${n1(tgt)}</span>
           </div>
           <p style="margin-top:12px;font-size:clamp(15px,2.2vw,21px);font-weight:750;letter-spacing:-.02em;
              color:${onTarget ? 'var(--good-ink)' : 'var(--crit-ink)'}">
-            ${onTarget ? '🎯 TARGET REACHED — ต่ำกว่าเป้าแล้ว ' + hr(tgt - cur)
-                       : 'ยังต้องลดอีก ' + hr(gap) + ' / เดือน'}
+            ${onTarget
+              ? (per.curPartial ? '🎯 ตามเป้าอยู่ — ต่ำกว่าเป้าของช่วงนี้ ' + hr(per.tgtToDate - cur)
+                                : '🎯 TARGET REACHED — ต่ำกว่าเป้าแล้ว ' + hr(tgt - cur))
+              : (per.curPartial ? 'เกินเป้าของช่วง 1–' + per.curDay + ' แล้ว ' + hr(gap)
+                                : 'ยังต้องลดอีก ' + hr(gap) + ' / เดือน')}
           </p>
           <p style="margin-top:4px;font-size:var(--t-sm);font-weight:650;
              color:${tone === 'good' ? 'var(--good-ink)' : tone === 'crit' ? 'var(--crit-ink)' : 'var(--muted)'}">${moved}</p>
@@ -3587,8 +3648,10 @@ P.overview = c => {
 
 /* ---------- 🔥 PROBLEMS ---------- */
 P.problems = c => {
-  const {o, byHours, byCount} = c;
+  const {o, per, byHours, byCount} = c;
   const cards = byHours.slice(0, 5);
+  const mv = monthCompare(c.measureRecs, per);
+  const better = mv.filter(r => r.delta < -0.05), worse = mv.filter(r => r.delta > 0.05);
   return `
   <div class="ph reveal">
     <div class="k">🔥 Problems</div>
@@ -3596,6 +3659,18 @@ P.problems = c => {
     <p>ดูสองมุมคู่กันเสมอ — “อะไรเสียบ่อย” กับ “อะไรทำให้หยุดนาน” ไม่ใช่เรื่องเดียวกัน</p>
   </div>
   ${catchAllWarning(byHours, o.hours)}
+
+  ${bare(`📊 เดือน ${monthLabel(per.curMonth)} เทียบกับ${per.baseName} — อะไรลดลง อะไรเพิ่มขึ้น`,
+    `<div class="bd">
+      <p style="font-size:var(--t-xs);color:var(--muted);margin-bottom:10px;line-height:var(--lh-body)">
+        เทียบชั่วโมงเครื่องหยุดรายระบบ · ลดลงรวม
+        <b style="color:var(--good-ink)">${hr(Math.abs(sum(better, r => r.delta)))}</b> จาก ${n0(better.length)} ระบบ ·
+        เพิ่มขึ้นรวม <b style="color:var(--crit-ink)">${hr(sum(worse, r => r.delta))}</b> จาก ${n0(worse.length)} ระบบ
+        ${per.curPartial ? `<br><b style="color:var(--warn-ink)">เดือนนี้ยังไม่จบ</b> — เทียบเฉพาะวันที่ 1–${per.curDay} ของทั้งสองฝั่ง จึงเทียบกันได้ตรง ๆ` : ''}</p>
+      ${moversHTML(mv, per, 7)}
+      <p style="font-size:var(--t-xs);color:var(--muted);margin-top:10px">
+        “ครั้ง” ของฝั่งฐานเป็นค่าเฉลี่ยต่อเดือนในช่วงฐาน · ระบบที่ไม่เคยมีในช่วงฐานจะขึ้นว่า “ของใหม่”</p>
+    </div>`, 'ตอบว่า “ที่แก้ไป ได้ผลอะไรบ้าง” เป็นรายระบบ', '', 'brk')}
 
   <div class="grid g5" style="margin-bottom:14px">
     ${cards.map((r, i) => `
@@ -3859,7 +3934,14 @@ let PER = null;
 function period(kept, recs){
   const f = S.f;
   const ax = monthAxis(kept);
-  const months = ax.months.filter(m => (!f.from || m >= f.from) && (!f.to || m <= f.to));
+  /* The month filter narrows what the ANALYSIS covers; it must not delete the
+     months the comparison needs. Filtering to ก.ย. alone used to leave no month
+     before it, so the base, the target and the gap all came out 0 — the page
+     said "ต้องลดอีก 21 ชม." against a target of zero. The axis therefore stays
+     whole and only the default month follows the filter. */
+  const months = ax.months;
+  const inRange = m => (!f.from || m >= f.from) && (!f.to || m <= f.to);
+  const ranged = months.filter(inRange);
   // coverage is judged on every ticket of the whole fleet: a month whose
   // durations were mostly never filled in says nothing about downtime, whatever
   // view is selected (2025-04 has six "stopped" tickets all timed, and 23% of
@@ -3871,7 +3953,13 @@ function period(kept, recs){
   const hoursIn = m => (own.get(m) || {hours: 0}).hours;
   const countIn = m => (own.get(m) || {count: 0}).count;
 
-  const auto = [...months].reverse().find(m => complete(m) && usable(m)) || months[months.length - 1] || '';
+  /* Default month: the newest finished month the filter allows. If the filter
+     points at a month that has not finished — someone narrowing to "ก.ย." to
+     see how this month is going — that month is used and labelled, rather than
+     jumping back to a month the filter excluded. */
+  const auto = [...ranged].reverse().find(m => complete(m) && usable(m))
+    || ranged[ranged.length - 1]
+    || [...months].reverse().find(m => complete(m) && usable(m)) || months[months.length - 1] || '';
   const curMonth = S.curMonth && months.includes(S.curMonth) ? S.curMonth : auto;
   const before = months.filter(m => m < curMonth && complete(m) && usable(m));
   const mode = CMP_MODES.some(x => x[0] === S.cmpMode) ? S.cmpMode : 'prev';
@@ -3890,8 +3978,34 @@ function period(kept, recs){
   const base = manual ? S.baseline : Math.round(avg(win) * 10) / 10;
   const tgt = base * (1 - S.targetPct / 100);
   const need = base - tgt;
-  const gap = Math.max(0, cur - tgt);
   const chg = base > 0 ? (cur - base) / base * 100 : null;
+  /* A month still running cannot be judged against a whole month's target, but
+     it can be judged against the part of it that should have been spent by now:
+     19 days into a 30-day month, the target so far is 19/30 of it. Without this
+     the page shows a month in progress "missing" a target it still has 11 days
+     to meet. */
+  const curPartial = !complete(curMonth);
+  const curDay = curPartial && ax.partial && ax.partial.month === curMonth ? ax.partial.day : 0;
+  const tgtToDate = curPartial && curDay ? tgt * curDay / daysIn(curMonth) : tgt;
+  const gap = Math.max(0, cur - tgtToDate);
+
+  /* The month in progress. It must never be compared against whole months, but
+     hiding it means that adding this month's export changes nothing on screen —
+     which is exactly what it looked like to the user. So it is compared with
+     the SAME DAYS of the month "ตอนนี้" points at: 1–20 ก.ย. against 1–20 ส.ค. */
+  const running = ax.partial && months.includes(ax.partial.month) && ax.partial.month !== curMonth
+    ? (() => {
+        const m = ax.partial.month, day = ax.partial.day;
+        const upto = mo => recs.filter(r => r.month === mo && r.hours != null &&
+          Number(String(r.date).slice(8, 10)) <= day);
+        const mine = upto(m), theirs = upto(curMonth);
+        const h = sum(mine, r => r.hours), ph = sum(theirs, r => r.hours);
+        return {month: m, day, lastDate: ax.partial.lastDate, days: ax.partial.days,
+          hours: h, count: recs.filter(r => r.month === m).length,
+          cmpMonth: curMonth, cmpHours: ph, cmpCount: theirs.length,
+          chg: ph > 0 ? (h - ph) / ph * 100 : null};
+      })()
+    : null;
 
   // month-on-month, newest last, each against the usable month before it
   const series = months.map((m, i) => {
@@ -3903,7 +4017,8 @@ function period(kept, recs){
   });
 
   return {
-    months, axis: ax.months, partial: ax.partial, curMonth, curPartial: !complete(curMonth), autoMonth: auto,
+    months, axis: ax.months, ranged, inRange, partial: ax.partial, curMonth, curPartial, curDay,
+    curDays: daysIn(curMonth), tgtToDate, onPace: cur <= tgtToDate, autoMonth: auto,
     cur, curCount: countIn(curMonth), mode, manual,
     modeLabel: (CMP_MODES.find(x => x[0] === mode) || CMP_MODES[0])[1],
     win, winLabel: manual ? 'ตัวเลขที่กำหนดเอง' : monthsLabel(win),
@@ -3913,9 +4028,9 @@ function period(kept, recs){
       : mode === 'all' ? 'เฉลี่ยทุกเดือนก่อนหน้า (' + monthsLabel(win) + ')'
       : 'เฉลี่ย 3 เดือนก่อน (' + monthsLabel(win) + ')',
     rateMonths, rateLabel: monthsLabel(rateMonths),
-    base, tgt, need, gap, chg, delta: cur - base, onTarget: cur <= tgt,
+    base, tgt, need, gap, chg, delta: cur - base, onTarget: cur <= tgtToDate,
     progress: need > 0 ? Math.min(100, Math.max(0, (base - cur) / need * 100)) : 0,
-    series, usable, complete, hoursIn,
+    series, usable, complete, hoursIn, running,
   };
 }
 
@@ -3933,6 +4048,37 @@ function rateOf(recs){
 const signPct = v => v == null ? '—' : (v > 0 ? '+' : v < 0 ? '−' : '±') + n1(Math.abs(v)) + '%';
 /** Less downtime is good: a fall is green, a rise is red, a wobble is neutral. */
 const chgTone = (v, band) => v == null ? '' : v <= -(band || 3) ? 'good' : v >= (band || 3) ? 'crit' : '';
+
+/** Which problems actually moved between the base and the month in view.
+    "Downtime went up 25%" is not an answer anyone can act on; "น้ำยาต่างๆ +180 ชม.,
+    เซ็นเซอร์ −64 ชม." is. Counts travel with the hours, because a problem that
+    happens as often but is cleared faster is a different story from one that
+    stopped happening. */
+function monthCompare(recs, p, keyFn){
+  const key = keyFn || (r => r.category);
+  const winSet = new Set(p.win);
+  const nWin = Math.max(1, winSet.size);
+  /* A month in progress is compared day-for-day, exactly like the headline:
+     1–19 ก.ย. against 1–19 of each base month. */
+  const upto = r => !p.curPartial || Number(String(r.date).slice(8, 10)) <= p.curDay;
+  const cur = recs.filter(r => r.month === p.curMonth && upto(r));
+  const was = recs.filter(r => winSet.has(r.month) && upto(r));
+  const m = new Map();
+  const add = (rs, field, cfield, div) => {
+    for(const r of rs){
+      const k = key(r) || UNCLASSIFIED;
+      const g = m.get(k) || {key: k, cur: 0, base: 0, curCount: 0, baseCount: 0};
+      if(r.hours != null) g[field] += r.hours / div;
+      g[cfield] += 1 / div;
+      m.set(k, g);
+    }
+  };
+  add(cur, 'cur', 'curCount', 1);
+  add(was, 'base', 'baseCount', nWin);      // per-month average over the window
+  return [...m.values()].map(g => ({...g, delta: g.cur - g.base,
+    chg: g.base > 0 ? (g.cur - g.base) / g.base * 100 : (g.cur > 0 ? null : 0)}))
+    .sort((a, b) => a.delta - b.delta);
+}
 
 /** The last few months side by side, each against the month before it — the
     question "did last month get better" answered without reading a chart. */
@@ -3954,6 +4100,59 @@ function momStrip(p, n){
           m.partial ? 'ยังไม่จบเดือน' : !m.usable ? 'ข้อมูลไม่ครบ' : signPct(m.chg)}</p>
       </div>`;
     }).join('')}
+  </div>`;
+}
+
+/** The month in progress, said out loud. Without this, dropping in this
+    month's export moves no number on the page — the month is (rightly) not
+    counted yet — and the update looks like it did nothing at all. */
+function runningNote(p){
+  const r = p.running;
+  if(!r) return '';
+  const t = chgTone(r.chg, 10);
+  return `<div class="banner ${t === 'good' ? 'good' : t === 'crit' ? 'crit' : 'info'} reveal" style="margin-bottom:14px">
+    <span class="i">🕒</span>
+    <div style="flex:1">
+      <b>เดือน ${esc(monthLabel(r.month))} ยังไม่จบ — ข้อมูลถึงวันที่ ${r.day}
+        (${esc(fmtDate(r.lastDate))})</b>
+      <p style="margin-top:3px;font-size:var(--t-xs);color:var(--muted);line-height:var(--lh-body)">
+        เท่าที่มีตอนนี้ <b class="tab" style="color:var(--ink)">${hr(r.hours)}</b> จาก ${n0(r.count)} ใบงาน ·
+        เทียบ<b>ช่วงวันเดียวกัน</b>ของเดือน ${esc(monthLabel(r.cmpMonth))}
+        (วันที่ 1–${r.day}) ที่ทำได้
+        <b class="tab" style="color:var(--ink)">${hr(r.cmpHours)}</b>
+        ${r.chg == null ? '' : `→ <b style="color:${t === 'good' ? 'var(--good-ink)' : t === 'crit' ? 'var(--crit-ink)' : 'var(--ink)'}">${
+          r.chg <= 0 ? 'ลดลง' : 'เพิ่มขึ้น'} ${signPct(r.chg).replace(/^[+−±]/, '')}</b>`}<br>
+        ตัวเลข “ตอนนี้” ด้านล่างยังเป็นเดือน ${esc(monthLabel(p.curMonth))} อยู่
+        และจะเปลี่ยนเป็น ${esc(monthLabel(r.month))} เมื่อข้อมูลครบเดือน —
+        ครึ่งเดือนเทียบกับเต็มเดือนจะดูเหมือนดีขึ้นเสมอ</p>
+    </div>
+  </div>`;
+}
+
+/** "อะไรดีขึ้น / อะไรแย่ลง" as two lists with the hours that moved. */
+function moversHTML(rows, p, n){
+  const real = rows.filter(r => r.cur > 0.05 || r.base > 0.05);
+  const down = real.filter(r => r.delta < -0.05).slice(0, n || 6);
+  const up = [...real].reverse().filter(r => r.delta > 0.05).slice(0, n || 6);
+  const line = (r, good) => `
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:baseline;padding:5px 0;
+         border-bottom:1px solid var(--line)">
+      <span style="min-width:0">
+        <b style="font-size:var(--t-sm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block"
+          title="${esc(r.key)}">${esc(clip(r.key, 34))}</b>
+        <span style="font-size:var(--t-2xs);color:var(--muted)">
+          ${n1(r.base)} → ${n1(r.cur)} ชม. · ${n1(r.baseCount)} → ${n0(r.curCount)} ครั้ง</span></span>
+      <span style="text-align:right;white-space:nowrap">
+        <b class="tab" style="font-size:var(--t-sm);color:var(--${good ? 'good' : 'crit'}-ink)">${
+          good ? '▼' : '▲'} ${n1(Math.abs(r.delta))} ชม.</b>
+        <span style="display:block;font-size:var(--t-2xs);color:var(--muted)">${r.chg == null ? 'ของใหม่' : signPct(r.chg)}</span></span>
+    </div>`;
+  const empty = '<p style="font-size:var(--t-sm);color:var(--muted);padding:6px 0">— ไม่มีรายการ —</p>';
+  return `<div class="grid g2" style="gap:14px">
+    <div><p class="eyebrow" style="color:var(--good-ink);margin-bottom:4px">✅ ลดลง — สิ่งที่ดีขึ้น</p>
+      ${down.map(r => line(r, true)).join('') || empty}</div>
+    <div><p class="eyebrow" style="color:var(--crit-ink);margin-bottom:4px">⚠️ เพิ่มขึ้น — ต้องตามต่อ</p>
+      ${up.map(r => line(r, false)).join('') || empty}</div>
   </div>`;
 }
 
@@ -6289,6 +6488,442 @@ P.rootcause = c => {
 };
 
 /* ==========================================================================
+   14e. 📅 รายสัปดาห์ — progress you can see before the month is over
+   A month is the unit the target is written in, but it is a slow feedback loop:
+   fix something on the 3rd and the number that proves it arrives after the 30th.
+   This page is the short loop — Monday-to-Sunday weeks, each against the week
+   before it, with the week still running compared day-for-day so a half week is
+   never read as an improvement (the same rule the monthly view uses).
+   ========================================================================== */
+const DAY_MS = 86400000;
+const mondayOf = iso => {
+  const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
+  const t = Date.UTC(y, m - 1, d);
+  const dow = (new Date(t).getUTCDay() + 6) % 7;          // Mon = 0
+  return new Date(t - dow * DAY_MS).toISOString().slice(0, 10);
+};
+const addDays = (iso, n) => new Date(Date.parse(iso + 'T00:00:00Z') + n * DAY_MS).toISOString().slice(0, 10);
+/** "8–14 ก.ย. 69" — one label for a Monday..Sunday span. */
+function weekLabel(mon){
+  const end = addDays(mon, 6);
+  const d = s => Number(s.slice(8, 10));
+  const mL = s => monthLabel(s.slice(0, 7));
+  return mon.slice(0, 7) === end.slice(0, 7)
+    ? `${d(mon)}–${d(end)} ${mL(mon)}`
+    : `${d(mon)} ${mL(mon)} – ${d(end)} ${mL(end)}`;
+}
+
+/** The weeks to put on screen, newest last.
+    Without a month filter: the last `n` weeks in the data. With one: every week
+    that overlaps the filtered months — the user asked for the month they chose,
+    not the whole history. Either way one extra week is computed in front of the
+    first and flagged `ctx`: a week needs the week before it to be able to say
+    "ดีขึ้นหรือแย่ลง", even when that week is outside the filter. */
+function weekSeries(recs, n, range){
+  const dated = recs.filter(r => r.date);
+  if(!dated.length) return [];
+  const dates = dated.map(r => r.date).sort();
+  const first = dates[0], last = dates[dates.length - 1];
+  const lastMon = mondayOf(last);
+  const endOf = m => m + '-' + String(daysIn(m)).padStart(2, '0');
+  let endMon = lastMon, weeks = n;
+  if(range && (range.from || range.to)){
+    const lo = range.from ? range.from + '-01' : first;
+    const hi = range.to ? endOf(range.to) : range.from ? endOf(range.from) : last;
+    const start = mondayOf(lo > first ? lo : first);
+    endMon = mondayOf(hi < last ? hi : last);
+    if(endMon < start) endMon = start;
+    weeks = Math.min(60, Math.round((Date.parse(endMon) - Date.parse(start)) / (7 * DAY_MS)) + 1);
+  }
+  const out = [];
+  for(let i = weeks; i >= 0; i--){
+    const mon = addDays(endMon, -7 * i), sun = addDays(mon, 6);
+    const rs = dated.filter(r => r.date >= mon && r.date <= sun);
+    const withH = rs.filter(r => r.hours != null);
+    // the week that holds the newest ticket is only as long as the data in it
+    const running = mon === lastMon && last < sun;
+    out.push({
+      mon, sun, label: weekLabel(mon),
+      hours: sum(withH, r => r.hours), count: rs.length, recs: rs,
+      partial: running,
+      through: running ? last : sun,
+      days: running ? Math.round((Date.parse(last) - Date.parse(mon)) / DAY_MS) + 1 : 7,
+      ctx: i === weeks,
+    });
+  }
+  // each week against the one before it, and the running week day-for-day
+  return out.map((w, i) => {
+    const prev = out[i - 1];
+    if(!prev) return {...w, chg: null, cmpHours: null};
+    const cmp = w.partial
+      ? sum(prev.recs.filter(r => r.hours != null && r.date <= addDays(prev.mon, w.days - 1)), r => r.hours)
+      : prev.hours;
+    return {...w, cmpHours: cmp, chg: cmp > 0 ? (w.hours - cmp) / cmp * 100 : null};
+  });
+}
+
+P.weekly = c => {
+  /* The weeks follow the month filter: pick ก.ย. and this page is September's
+     weeks, not thirteen weeks of history. Everything else the bar filters
+     (brand, branch, system, stopped-only) is already in measureRecs. */
+  const rng = {from: S.f.from, to: S.f.to};
+  const filtered = !!(rng.from || rng.to);
+  const rangeLabel = filtered
+    ? (rng.from && rng.to && rng.from !== rng.to ? monthLabel(rng.from) + ' – ' + monthLabel(rng.to)
+      : monthLabel(rng.from || rng.to))
+    : '';
+  const series = weekSeries(c.measureRecs, 13, rng);
+  const ws = series.filter(w => !w.ctx);
+  if(!ws.length) return `<div class="ph reveal"><div class="k">📅 รายสัปดาห์</div>
+    <h1>ความคืบหน้ารายสัปดาห์</h1></div><p class="empty"><b>ยังไม่มีข้อมูล</b>${
+      filtered ? `<br>ช่วงที่กรองไว้ (${esc(rangeLabel)}) ไม่มีใบงาน` : ''}</p>`;
+  const cur = ws[ws.length - 1], prev = series[series.indexOf(cur) - 1];
+  const done = ws.filter(w => !w.partial);
+  const per = c.per;
+  // the monthly target, expressed per week and — for the week in progress —
+  // per day elapsed, so "เข้าเป้าไหม" can be answered on a Wednesday
+  const tgtWeek = per.curDays ? per.tgt * 7 / per.curDays : per.tgt / 4.345;
+  const tgtNow = tgtWeek * (cur.days || 7) / 7;
+  const onPace = cur.hours <= tgtNow;
+  const t = chgTone(cur.chg, 10);
+  const max = Math.max(1, ...ws.map(w => w.hours), tgtWeek);
+  const avg4 = done.slice(-4);
+  const avg4h = avg4.length ? sum(avg4, w => w.hours) / avg4.length : 0;
+
+  const bar = w => {
+    const on = w.hours <= tgtWeek * (w.days || 7) / 7;
+    return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:3px;min-width:0"
+        title="${esc(w.label)}${w.partial ? ' (ถึง ' + esc(fmtDate(w.through)) + ')' : ''}: ${esc(hr(w.hours))} · ${n0(w.count)} ใบงาน${
+          w.chg == null ? '' : ' · เทียบสัปดาห์ก่อน ' + signPct(w.chg)}">
+      <span class="tab" style="font-size:var(--t-2xs);color:var(--muted)">${n0(w.hours)}</span>
+      <i style="display:block;width:100%;max-width:46px;border-radius:5px 5px 0 0;
+        height:${Math.max(2, w.hours / max * 150)}px;
+        background:${on ? 'var(--good)' : 'var(--crit)'};${w.partial ? 'opacity:.55;' : ''}"></i>
+      <span style="font-size:var(--t-2xs);color:${w === cur ? 'var(--ink)' : 'var(--muted)'};
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">${esc(w.label.replace(/ \S+$/, ''))}</span>
+    </div>`;
+  };
+
+  return `
+  <div class="ph reveal">
+    <div class="k">📅 รายสัปดาห์</div>
+    <h1>สัปดาห์นี้ดีขึ้นหรือยัง?</h1>
+    <p>${filtered
+      ? `กำลังดูเฉพาะ<b>${esc(rangeLabel)}</b> ตามตัวกรองด้านบน — ${n0(ws.length)} สัปดาห์ที่คาบเกี่ยวช่วงนี้
+         (สัปดาห์ก่อนหน้าถูกคำนวณไว้เพื่อใช้เทียบ แต่ไม่แสดง)`
+      : 'สัปดาห์ = จันทร์–อาทิตย์ · เลือกเดือนที่ตัวกรองด้านบนเพื่อดูเฉพาะสัปดาห์ของเดือนนั้น'} ·
+       สัปดาห์ที่ยังไม่จบจะเทียบกับ<b>ช่วงวันเดียวกัน</b>ของสัปดาห์ก่อน
+       ไม่เอาครึ่งสัปดาห์ไปเทียบทั้งสัปดาห์ · เป้าต่อสัปดาห์แปลงมาจากเป้ารายเดือนที่ตั้งไว้</p>
+  </div>
+
+  ${editBanner(c)}
+
+  <div class="grid g5" style="margin-bottom:14px">
+    ${kpiCard({label: cur.partial ? `สัปดาห์นี้ (ถึง ${fmtDate(cur.through)})` : 'สัปดาห์ล่าสุด',
+      raw: cur.hours, dp:1, unit:'ชม.', sub: `${esc(cur.label)} · ${n0(cur.count)} ใบงาน`,
+      tone: onPace ? 'good' : 'crit', d:1})}
+    ${kpiCard({label:'สัปดาห์ก่อน' + (cur.partial ? ' (ช่วงวันเดียวกัน)' : ''),
+      raw: cur.cmpHours != null ? cur.cmpHours : (prev ? prev.hours : 0), dp:1, unit:'ชม.',
+      sub: prev ? esc(prev.label) : '—', tone:'warn', d:2})}
+    ${kpiCard({label:'เปลี่ยนแปลงจากสัปดาห์ก่อน', value: signPct(cur.chg), unit:'',
+      sub: cur.chg == null ? 'ยังไม่มีสัปดาห์ก่อนให้เทียบ'
+        : `${cur.chg <= 0 ? '▼ ลดลง' : '▲ เพิ่มขึ้น'} ${hr(Math.abs(cur.hours - cur.cmpHours))}`,
+      tone: t || 'info', d:3})}
+    ${kpiCard({label: cur.partial ? `เป้าถึงวันนี้ (${cur.days} วัน)` : 'เป้าต่อสัปดาห์',
+      raw: cur.partial ? tgtNow : tgtWeek, dp:1, unit:'ชม.',
+      sub:`จากเป้าเดือน ${n1(per.tgt)} ชม. (ลด ${S.targetPct}% จากฐาน)`, tone:'info', d:4})}
+    ${kpiCard({label:'สถานะ', value: onPace ? '🟢 เข้าเป้า' : '🔴 ยังไม่เข้าเป้า', unit:'',
+      sub: onPace ? `ต่ำกว่าเป้าของช่วงนี้ ${hr(tgtNow - cur.hours)}` : `เกินเป้าของช่วงนี้ ${hr(cur.hours - tgtNow)}`,
+      tone: onPace ? 'good' : 'crit', d:5})}
+  </div>
+
+  ${bare(filtered ? `${n0(ws.length)} สัปดาห์ของ ${esc(rangeLabel)}` : `${n0(ws.length)} สัปดาห์ล่าสุด`,
+    `<div class="bd">
+      <div style="display:flex;align-items:flex-end;gap:6px;height:190px">${ws.map(bar).join('')}</div>
+      <p style="font-size:var(--t-xs);color:var(--muted);margin-top:10px">
+        <i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--good)"></i> อยู่ในเป้าของสัปดาห์
+        (${n1(tgtWeek)} ชม.) ·
+        <i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--crit)"></i> เกินเป้า ·
+        แท่งจาง = สัปดาห์ที่ยังไม่จบ · เฉลี่ย 4 สัปดาห์เต็มล่าสุด <b class="tab">${n1(avg4h)}</b> ชม./สัปดาห์</p>
+    </div>`, 'จันทร์–อาทิตย์ · ตัวเลขบนแท่ง = ชั่วโมงที่เครื่องหยุดในสัปดาห์นั้น')}
+
+  <section class="card" style="margin-top:14px">
+    <div class="hd"><div><h3>ตารางรายสัปดาห์</h3>
+      <p>เทียบสัปดาห์ต่อสัปดาห์ และดูว่าอะไรกินเวลามากที่สุดในแต่ละสัปดาห์</p></div></div>
+    ${tableHTML(
+      [{h:'สัปดาห์'}, {h:'ชั่วโมง', num:1}, {h:'ใบงาน', num:1}, {h:'เทียบสัปดาห์ก่อน', num:1},
+       {h:'เป้าของสัปดาห์', num:1}, {h:'ผล'}, {h:'ปัญหาอันดับ 1 ของสัปดาห์'}],
+      [...ws].reverse().map(w => {
+        const tg = tgtWeek * (w.days || 7) / 7;
+        const ok = w.hours <= tg;
+        const top = pareto(groupBy(w.recs, r => r.category), 'hours')[0];
+        const tone = chgTone(w.chg, 10);
+        return [
+          `<b>${esc(w.label)}</b>${w.partial ? `<br><span style="font-size:var(--t-2xs);color:var(--warn-ink)">ยังไม่จบสัปดาห์ · ถึง ${esc(fmtDate(w.through))}</span>` : ''}`,
+          `<b class="tab">${n1(w.hours)}</b>`, n0(w.count),
+          w.chg == null ? '<span style="color:var(--muted)">—</span>'
+            : `<b class="tab" style="color:${tone === 'good' ? 'var(--good-ink)' : tone === 'crit' ? 'var(--crit-ink)' : 'var(--muted)'}">${signPct(w.chg)}</b>`,
+          n1(tg),
+          ok ? '<span class="chip good">เข้าเป้า</span>' : '<span class="chip crit">เกินเป้า</span>',
+          top ? `${esc(clip(top.key, 28))} <span style="color:var(--muted)">${n1(top.hours)} ชม. · ${n0(top.count)} ครั้ง</span>` : '—',
+        ];
+      }), {maxH: 420})}
+  </section>
+
+  <div class="card" style="margin-top:14px;padding:15px 17px">
+    <p class="eyebrow" style="margin-bottom:7px">อ่านตารางนี้ยังไง</p>
+    <ul style="font-size:var(--t-sm);color:var(--ink2);line-height:1.9;padding-left:18px">
+      <li>เป้าของสัปดาห์ = เป้ารายเดือน ${n1(per.tgt)} ชม. หารตามจำนวนวัน (7 วันจาก ${per.curDays} วันของเดือน)</li>
+      <li>สัปดาห์ที่ยังไม่จบมีเป้าตามวันที่ผ่านไปจริง จึงเทียบกันได้ตั้งแต่กลางสัปดาห์</li>
+      <li>ตัวเลขใช้ตัวกรองด้านบนทั้งหมด รวมทั้ง<b>ช่วงเดือน</b> —
+        ${filtered ? `ตอนนี้กรองไว้ที่ <b>${esc(rangeLabel)}</b> จึงเห็นเฉพาะสัปดาห์ของช่วงนี้`
+          : 'ตอนนี้ไม่ได้กรองเดือน จึงแสดง 13 สัปดาห์ล่าสุด'}</li>
+      <li>สัปดาห์แรกที่แสดงยังเทียบกับสัปดาห์ก่อนหน้าได้ เพราะระบบคำนวณสัปดาห์นั้นไว้ด้วย
+        แม้จะอยู่นอกช่วงที่กรอง</li>
+    </ul>
+  </div>`;
+};
+
+/* ==========================================================================
+   14f. 🗄 ชุดข้อมูล — what is actually in this database, year by year
+   "ข้อมูลมั่ว" is almost never a broken formula. It is a month nobody noticed
+   was missing, a month that came in twice under two filenames, or a month that
+   holds QW and no WAG. None of that shows up in a chart of hours, so this page
+   shows the inventory itself: every month of every year, how many tickets are
+   in it, which file each one came from, and what a file still waiting to be
+   saved would change. It deliberately ignores the filter bar — this is about
+   the database, not about the current view.
+   ========================================================================== */
+const CAL_MON = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+
+/** Every month present, plus the holes between the first and the last — a
+    missing month in the middle is a fact about the database; months before it
+    started or after the newest export are not. */
+function inventory(recs){
+  const M = new Map();
+  let undated = 0;
+  for(const r of recs){
+    if(!r.month){ undated++; continue; }
+    let e = M.get(r.month);
+    if(!e) M.set(r.month, e = {month: r.month, count: 0, hours: 0, timed: 0,
+      brands: new Map(), srcs: new Map()});
+    e.count++;
+    if(r.hours != null){ e.hours += r.hours; e.timed++; }
+    const b = r.brand === 'QW' || r.brand === 'WAG' ? r.brand : 'อื่นๆ';
+    e.brands.set(b, (e.brands.get(b) || 0) + 1);
+    const s = r.source || '—';
+    e.srcs.set(s, (e.srcs.get(s) || 0) + 1);
+  }
+  const months = [...M.keys()].sort();
+  const first = months[0] || '', last = months[months.length - 1] || '';
+  const gaps = [];
+  if(first && last){
+    for(let y = Number(first.slice(0, 4)); y <= Number(last.slice(0, 4)); y++){
+      for(let m = 1; m <= 12; m++){
+        const k = y + '-' + String(m).padStart(2, '0');
+        if(k > first && k < last && !M.has(k)) gaps.push(k);
+      }
+    }
+  }
+  return {map: M, months, first, last, gaps, undated,
+    brands: uniq(recs.map(r => r.brand).filter(b => b === 'QW' || b === 'WAG')).sort(),
+    years: uniq(months.map(m => m.slice(0, 4))).sort()};
+}
+
+/** What each file is contributing right now. A sheet re-sent next month repeats
+    most of its rows, so "แถวในไฟล์" and "ใบงานที่ใช้จากไฟล์นี้" are two
+    different questions and both belong on screen. */
+function bySource(recs){
+  const M = new Map();
+  for(const r of recs){
+    const n = r.source || '—';
+    let e = M.get(n);
+    if(!e) M.set(n, e = {name: n, count: 0, hours: 0, months: new Set(), brands: new Set(), undated: 0});
+    e.count++;
+    if(r.hours != null) e.hours += r.hours;
+    if(r.month) e.months.add(r.month); else e.undated++;
+    if(r.brand) e.brands.add(r.brand);
+  }
+  return M;
+}
+
+/** The two real exports differ only at the END of their names
+    ("…แจ้งซ่อมQW (1)" vs "…แจ้งซ่อม WG (3)"), so a name clipped from the front
+    turns into two identical chips. Keep the tail, drop the head. */
+const fileTag = n => {
+  const base = String(n).replace(/\.(xlsx|xlsm|xls|csv)$/i, '');
+  return base.length > 24 ? '…' + base.slice(-23) : base;
+};
+
+const monthSpan = set => {
+  const a = [...set].sort();
+  return a.length ? (a.length === 1 ? monthLabel(a[0])
+    : monthLabel(a[0]) + ' – ' + monthLabel(a[a.length - 1])) : '—';
+};
+
+P.dataset = c => {
+  const inv = inventory(c.corrected);
+  const src = bySource(c.corrected);
+  const per = c.per;
+  const files = S.sources.filter(s => s.kind !== ROSTER_KIND);
+  const pending = unsavedAdds();
+  const both = inv.brands.length > 1;
+
+  if(!inv.months.length) return `<div class="ph reveal"><div class="k">🗄 ชุดข้อมูล</div>
+    <h1>ฐานข้อมูลนี้มีอะไรอยู่บ้าง</h1></div>
+    <p class="empty"><b>ยังไม่มีข้อมูลในระบบ</b><br>ลากไฟล์ใบงานมาวางเพื่อเริ่ม</p>`;
+
+  /* --- the year × month calendar ------------------------------------------ */
+  const tone = k => {
+    const e = inv.map.get(k);
+    if(!e) return k > inv.first && k < inv.last ? 'crit' : null;
+    if(k === per.curMonth && per.curPartial) return 'info';
+    if(both && e.brands.size < inv.brands.length) return 'warn';
+    if(e.count && e.timed / e.count * 100 < 80) return 'warn';
+    return 'good';
+  };
+  const cellHTML = k => {
+    const e = inv.map.get(k), t = tone(k);
+    if(!e) return `<td style="padding:3px"><div style="border:1px dashed ${
+      t === 'crit' ? 'color-mix(in srgb,var(--crit) 45%,transparent)' : 'var(--line)'};border-radius:9px;
+      padding:7px 3px;text-align:center;font-size:var(--t-2xs);
+      color:${t === 'crit' ? 'var(--crit-ink)' : 'var(--muted)'}"
+      title="${esc(monthLabel(k))} — ${t === 'crit' ? 'ไม่มีข้อมูลเดือนนี้ในฐานข้อมูล' : 'อยู่นอกช่วงข้อมูล'}"
+      >${t === 'crit' ? 'ไม่มี' : '·'}</div></td>`;
+    const cov = e.count ? e.timed / e.count * 100 : 0;
+    const bl = [...e.brands].map(([b, n]) => b + ' ' + n0(n)).join(' · ');
+    return `<td style="padding:3px"><div data-mgo="${k}"
+      title="${esc(monthLabel(k))} · ${n0(e.count)} ใบงาน · ${esc(hr(e.hours))} · กรอกเวลา ${pc(cov, 0)} · ${esc(bl)} · ไฟล์: ${esc([...e.srcs.keys()].join(', '))} — กดเพื่อกรองดูเฉพาะเดือนนี้"
+      style="cursor:pointer;border:1px solid color-mix(in srgb,var(--${t}) 38%,transparent);
+      background:var(--${t}-soft);border-radius:9px;padding:6px 3px;text-align:center">
+      <b class="tab" style="font-size:13.5px;color:var(--${t}-ink);display:block;line-height:1.25">${n0(e.count)}</b>
+      <span style="font-size:var(--t-2xs);color:var(--muted)">${n0(e.hours)} ชม.</span>
+      ${k === per.curMonth && per.curPartial
+        ? '<span style="font-size:var(--t-2xs);display:block;color:var(--info-ink)">ยังไม่จบ</span>' : ''}
+    </div></td>`;
+  };
+  const calendar = `<div class="scrollx"><table class="tbl" style="min-width:780px">
+    <thead><tr><th style="width:62px">ปี</th>${CAL_MON.map(m => `<th style="text-align:center">${m}</th>`).join('')}
+      <th style="text-align:right">รวมทั้งปี</th></tr></thead>
+    <tbody>${inv.years.map(y => {
+      const ms = inv.months.filter(m => m.slice(0, 4) === y);
+      const n = sum(ms, m => inv.map.get(m).count), h = sum(ms, m => inv.map.get(m).hours);
+      return `<tr><td><b class="tab">${Number(y) + 543}</b></td>
+        ${CAL_MON.map((_, i) => cellHTML(y + '-' + String(i + 1).padStart(2, '0'))).join('')}
+        <td class="num"><b class="tab">${n0(n)}</b><br>
+          <span style="font-size:var(--t-2xs);color:var(--muted)">${esc(hr(h))}</span></td></tr>`;
+    }).join('')}</tbody></table></div>`;
+
+  /* --- month by month, with the file each month came from ------------------ */
+  const mRows = [...inv.months].reverse().map(k => {
+    const e = inv.map.get(k), cov = e.count ? e.timed / e.count * 100 : 0;
+    const missing = inv.brands.filter(b => !e.brands.has(b));
+    const state = k === per.curMonth && per.curPartial
+      ? '<span class="chip info">⏳ เดือนนี้ยังไม่จบ</span>'
+      : both && missing.length ? `<span class="chip warn">⚠ ขาด ${esc(missing.join(' · '))}</span>`
+      : cov < 80 ? `<span class="chip warn">⚠ กรอกเวลา ${pc(cov, 0)}</span>`
+      : '<span class="chip good">✓ ครบ</span>';
+    return [
+      `<b data-mgo="${k}" style="cursor:pointer">${esc(monthLabel(k))}</b>`,
+      `<b class="tab">${n0(e.count)}</b>`,
+      ...inv.brands.map(b => n0(e.brands.get(b) || 0)),
+      esc(hr(e.hours)), pc(cov, 0),
+      [...e.srcs.entries()].sort((a, b) => b[1] - a[1]).map(([n, v]) =>
+        `<span class="chip" title="${esc(n)}">${esc(fileTag(n))} · ${n0(v)}</span>`).join(' '),
+      state,
+    ];
+  });
+  const mCols = [{h: 'เดือน'}, {h: 'ใบงาน', num: true},
+    ...inv.brands.map(b => ({h: b, num: true})),
+    {h: 'ชั่วโมง', num: true}, {h: 'กรอกเวลา', num: true}, {h: 'มาจากไฟล์'}, {h: 'สถานะ'}];
+
+  /* --- file by file -------------------------------------------------------- */
+  const fRows = files.map(s => {
+    const e = src.get(s.name) || {count: 0, hours: 0, months: new Set(), brands: new Set()};
+    const over = s.merged || 0;
+    return [
+      `<b title="${esc(s.name)}">${esc(clip(s.name, 42))}</b>`,
+      locked(s) ? '<span class="chip">🔒 ฐานข้อมูลหลัก</span>'
+        : s.base ? '<span class="chip">📦 ตั้งต้น</span>' : '<span class="chip">📄 เพิ่มเอง</span>',
+      `<b class="tab">${n0(e.count)}</b>`,
+      n0(s.rows || 0) + (over
+        ? `<br><span style="font-size:var(--t-2xs);color:var(--muted)">ทับของเดิม ${n0(over)}</span>` : ''),
+      esc(monthSpan(e.months)),
+      esc([...e.brands].sort().join(' · ') || '—'),
+      esc(fmtWhen(s.at)),
+      pending.some(p => p.name === s.name) ? '<span class="chip warn">⏳ ยังไม่บันทึก</span>'
+        : '<span class="chip good">✓ อยู่ในฐานข้อมูล</span>',
+    ];
+  });
+
+  const totN = sum(inv.months, m => inv.map.get(m).count);
+  const totH = sum(inv.months, m => inv.map.get(m).hours);
+
+  return `
+  <div class="ph reveal">
+    <div class="k">🗄 ชุดข้อมูล</div>
+    <h1>ฐานข้อมูลนี้มีอะไรอยู่บ้าง</h1>
+    <p>ทั้งฐานข้อมูล แยกตาม<b>ปี → เดือน</b> และบอกว่าแต่ละเดือนมาจากไฟล์ไหน —
+       หน้านี้<b>ไม่ขึ้นกับตัวกรองด้านบน</b> เพราะมีไว้ตรวจว่าข้อมูลครบและไม่ปนกัน ·
+       กดที่ช่องเดือนเพื่อกรองดูเฉพาะเดือนนั้น</p>
+  </div>
+
+  ${inv.gaps.length ? `<div class="banner warn reveal" style="margin-bottom:14px">
+    <span class="i">⚠</span>
+    <div><b>มีเดือนที่ไม่มีข้อมูลคั่นอยู่ ${n0(inv.gaps.length)} เดือน</b> —
+      ${esc(inv.gaps.map(monthLabel).join(' · '))}<br>
+      ถ้ามีไฟล์ของเดือนเหล่านี้ ให้ลากมาเพิ่ม ตัวเลขเปรียบเทียบจะได้ไม่ขาดช่วง</div></div>` : ''}
+
+  ${pending.length ? `<div class="banner warn reveal" style="margin-bottom:14px">
+    <span class="i">⏳</span>
+    <div><b>กำลังจะเพิ่ม ${n0(pending.length)} ไฟล์ — ยังไม่อยู่ในฐานข้อมูล</b><br>
+      ${pending.map(s => {
+        const e = src.get(s.name);
+        return esc(clip(s.name, 40)) + ' — ' +
+          (e ? n0(e.count) + ' ใบงาน · ' + esc(monthSpan(e.months)) : 'ไม่มีใบงาน') +
+          (s.merged ? ' · ทับของเดิม ' + n0(s.merged) : '');
+      }).join('<br>')}<br>
+      ตัวเลขทุกหน้ารวมไฟล์เหล่านี้แล้ว แต่ถ้ารีเฟรชก่อนบันทึกจะหาย —
+      กด <b>📤 บันทึกลงฐานข้อมูล</b> ที่แถบเตือนด้านบนก่อน</div></div>` : ''}
+
+  <div class="grid g5" style="margin-bottom:14px">
+    ${kpiCard({label: 'ใบงานในฐานข้อมูล', raw: totN, unit: 'ใบ',
+      sub: `${n0(files.length)} ไฟล์ · ${n0(inv.months.length)} เดือน`, tone: 'info', d: 1})}
+    ${kpiCard({label: 'ช่วงข้อมูล', value: monthLabel(inv.first) + ' – ' + monthLabel(inv.last), unit: '',
+      sub: inv.gaps.length ? `⚠ ขาด ${n0(inv.gaps.length)} เดือนตรงกลาง` : 'ต่อเนื่อง ไม่มีเดือนขาด',
+      tone: inv.gaps.length ? 'warn' : 'good', d: 2})}
+    ${kpiCard({label: 'ชั่วโมงรวมทั้งฐานข้อมูล', raw: totH, dp: 1, unit: 'ชม.',
+      sub: 'ก่อนกรอง ทุกเดือนรวมกัน', tone: 'info', d: 3})}
+    ${kpiCard({label: 'แบรนด์ที่มีข้อมูล', value: inv.brands.join(' + ') || '—', unit: '',
+      sub: both ? 'ครบทั้งสองแบรนด์' : '⚠ มีแบรนด์เดียว', tone: both ? 'good' : 'warn', d: 4})}
+    ${kpiCard({label: 'แถวที่ไม่มีวันที่', raw: inv.undated, unit: 'แถว',
+      sub: inv.undated ? 'อ่านเข้ามาแต่คิดเป็นเดือนไม่ได้' : 'ไม่มี — ดีแล้ว',
+      tone: inv.undated ? 'warn' : 'good', d: 5})}
+  </div>
+
+  ${bare('ปฏิทินข้อมูล — ปี × เดือน', `<div class="bd">${calendar}
+    <p style="font-size:var(--t-xs);color:var(--muted);margin-top:10px">
+      ตัวเลขบน = จำนวนใบงาน · ตัวเลขล่าง = ชั่วโมง ·
+      <span class="chip good">ครบ</span>
+      <span class="chip warn">ขาดแบรนด์ / กรอกเวลาไม่ถึง 80%</span>
+      <span class="chip info">เดือนที่ยังไม่จบ</span>
+      <span class="chip crit">ไม่มีข้อมูลทั้งที่อยู่ในช่วง</span></p></div>`,
+    'เดือนไหนมีข้อมูล เดือนไหนหาย เห็นในตารางเดียว')}
+
+  <div style="height:14px"></div>
+  ${card('แต่ละเดือนมาจากไฟล์ไหน', tableHTML(mCols, mRows, {maxH: 460}),
+    'เดือนเดียวมีหลายชื่อไฟล์ได้ = รวมกันตามเลขที่งานแล้ว ไม่ได้นับซ้ำ')}
+
+  <div style="height:14px"></div>
+  ${card('ไฟล์ในฐานข้อมูล', tableHTML([{h: 'ไฟล์'}, {h: 'ประเภท'},
+    {h: 'ใบงานที่ใช้จากไฟล์นี้', num: true}, {h: 'แถวในไฟล์', num: true},
+    {h: 'ช่วงเดือน'}, {h: 'แบรนด์'}, {h: 'อ่านเข้ามาเมื่อ'}, {h: 'สถานะ'}], fRows),
+    'ไฟล์เดือนใหม่มักส่งใบงานเก่ามาด้วย ระบบทับตาม<b>เลขที่งาน</b> — ' +
+    '“ใบงานที่ใช้จากไฟล์นี้” จึงน้อยกว่า “แถวในไฟล์” ได้ ไม่ได้แปลว่าข้อมูลหาย')}
+  `;
+};
+
+/* ==========================================================================
    14e. 👷 ทีมช่าง & SLA — what to develop so the team passes SLA
    The question is not "who is slow". Every team's median repair is fine; what
    breaks SLA is a tail of jobs that run for days. So this page separates the
@@ -7255,7 +7890,7 @@ function renderRail(){
       <b class="tab" style="font-size:15px;color:var(--muted)">${n0(tgt)}</b></div>
     <div class="track" style="height:6px;margin-top:8px">
       <i style="width:${onTarget ? 100 : per.progress}%;
-         background:${onTarget ? 'var(--good)' : 'var(--warn)'}"></i></div>
+         background:${onTarget ? 'var(--good)' : 'var(--crit)'}"></i></div>
     <p style="font-size:12px;color:var(--muted);margin-top:6px">
       <b class="tab" style="color:${t === 'good' ? 'var(--good-ink)' : t === 'crit' ? 'var(--crit-ink)' : 'var(--muted)'}"
         title="เทียบกับ${esc(per.baseName)}">${signPct(chg)}</b> จากฐาน ·
@@ -7480,6 +8115,15 @@ function bindGlobalEvents(){
     const t = e.target;
     const go = t.closest('[data-go]');
     if(go){ S.page = go.dataset.go; $('rail').classList.remove('open'); $('scrim').classList.remove('on'); render(); return; }
+    // a month on the ชุดข้อมูล calendar: narrow every page to it, or let go of
+    // it by pressing the same month again
+    const mg = t.closest('[data-mgo]');
+    if(mg){
+      const m = mg.dataset.mgo;
+      const on = S.f.from === m && S.f.to === m;
+      S.f.from = on ? '' : m; S.f.to = on ? '' : m;
+      render(); return;
+    }
     if(t.closest('[data-closedrill]')){ closeDrill(); return; }
     const drill = t.closest('[data-drill]');
     if(drill){ openDrill(drill.dataset.drill, drill.dataset.key); return; }
@@ -7661,6 +8305,16 @@ function bindGlobalEvents(){
       }, 60);
       return;
     }
+    if(t.id === 'pendBackup'){
+      // the escape hatch when the browser cannot reach the database: the whole
+      // tab — tickets included — in one file that publish.mjs can read back
+      setTimeout(async () => {
+        const st = await exportState();
+        toast('📥 ดาวน์โหลด dra-state.json แล้ว (' + n0(st.rows) + ' ใบงาน) — ' +
+          'ไฟล์นี้กู้ข้อมูลที่เพิ่งเพิ่มกลับมาได้ ส่งให้ผู้ดูแลเพื่อขึ้นเว็บได้เลย');
+      }, 60);
+      return;
+    }
     if(t.id === 'stateAdopt'){
       const sh = sharedState();
       if(!sh) return;
@@ -7723,7 +8377,7 @@ function bindGlobalEvents(){
     const sb = t.closest('[data-srcbase]');
     if(sb){
       const s = S.sources[Number(sb.dataset.srcbase)];
-      if(!s) return;
+      if(!s || locked(s)) return;
       if(s.base){
         // which brands would be left with no baseline if this one stops being it
         const brands = uniq(S.raw.filter(r => r.source === s.name).map(r => r.brand))
@@ -7741,6 +8395,11 @@ function bindGlobalEvents(){
     if(sd){
       const i = Number(sd.dataset.srcdel), s = S.sources[i];
       if(!s) return;
+      if(locked(s)){
+        alert('“' + s.name + '” เป็นไฟล์ตั้งต้นของฐานข้อมูล ลบไม่ได้\n' +
+          'ไฟล์เดือนใหม่ที่เพิ่มเข้ามาจะรวมกับชุดนี้ตามเลขที่งาน ของเก่าไม่หาย');
+        return;
+      }
       if(!confirm('เอาไฟล์ “' + s.name + '” ออกจากชุดข้อมูล?')) return;
       S.sources.splice(i, 1);
       rebuildFromSources();
@@ -7753,10 +8412,10 @@ function bindGlobalEvents(){
       return;
     }
     if(t.id === 'srcClearAdded'){
-      const added = S.sources.filter(s => !s.base);
+      const added = S.sources.filter(s => !s.base && !locked(s));
       if(!added.length) return;
       if(!confirm('ล้าง ' + added.length + ' ไฟล์ที่เพิ่มเข้ามา แล้วเหลือไว้เฉพาะไฟล์ตั้งต้น?')) return;
-      S.sources = S.sources.filter(s => s.base);
+      S.sources = S.sources.filter(s => s.base || locked(s));
       rebuildFromSources();
       saveDataset().then(() => { assignKeys(S.raw); render(); renderGateSources(); });
       return;
@@ -7772,6 +8431,14 @@ function bindGlobalEvents(){
       return;
     }
     if(t.id === 'srcClear'){
+      if(S.sources.some(locked)){
+        // the baseline is what every monthly file merges onto — it cannot be
+        // fetched back from disk on the published copy, and on the local file
+        // it is the database the build was made from
+        alert('ฐานข้อมูลหลัก (ไฟล์ QW และ WAG ที่ฝังมากับไฟล์) ลบไม่ได้\n' +
+          'กด “ล้างเฉพาะไฟล์ที่เพิ่มเข้ามา” เพื่อเอาเฉพาะไฟล์รายเดือนออก');
+        return;
+      }
       if(!confirm('ล้างไฟล์ทั้งหมดออกจากชุดข้อมูล? ' +
         (hasBaseData() ? 'กดปุ่ม “โหลดข้อมูลตั้งต้น” เพื่อเอากลับมาได้ทีหลัง · ' : '') +
         'การแก้ไขข้อมูลและแผนงานจะยังอยู่')) return;
@@ -8214,8 +8881,12 @@ async function loadFiles(list, opt){
           'และคอลัมน์ชื่อช่างอย่างน้อย 2 คอลัมน์</span>'); continue;
       }
       (S.sources.some(s => s.name === f.name) ? updated : added).push(f.name);
-      // dirty = present here but not in the published database yet
-      mergeSource({name: f.name, hint, grid: parsed.grid, dirty: true});
+      // dirty = present here but not in the published database yet · core:false
+      // = added by hand, so it stays removable even after it is saved. Re-reading
+      // one of the exports the database was built from must not demote it.
+      const ex = S.sources.find(s => s.name === f.name);
+      mergeSource({name: f.name, hint, grid: parsed.grid, dirty: true,
+        core: !!(ex && ex.core)});
     }catch(err){ errs.push(esc(f.name) + ' — ' + esc(err.message)); }
   }
   const replaced = rebuildFromSources();
@@ -8325,11 +8996,13 @@ function renderGateSources(){
         return b.length ? `<span class="chip" style="flex:0 0 auto">${esc(b.join('/'))}</span>` : ''; })()}
       <span class="tab" style="color:var(--muted);white-space:nowrap">${n0(s.rows || 0)} แถว</span>
       <span style="color:var(--muted);white-space:nowrap;font-size:var(--t-2xs)">${esc(fmtWhen(s.at))}</span>
-      <button class="btn sm${s.base ? ' on' : ' ghost'}" data-srcbase="${i}"
+      ${locked(s) ? `<span class="chip" title="ไฟล์ตั้งต้นของฐานข้อมูล — ลบหรือยกเลิกไม่ได้ ไฟล์เดือนใหม่จะรวมเข้ากับชุดนี้"
+          style="flex:0 0 auto">🔒 ฐานข้อมูลหลัก</span>`
+        : `<button class="btn sm${s.base ? ' on' : ' ghost'}" data-srcbase="${i}"
         title="${s.base ? 'ตอนนี้เป็นไฟล์ตั้งต้น — กดเพื่อยกเลิก'
           : 'ตั้งให้เป็นไฟล์ตั้งต้น จะไม่ถูกลบตอนล้างไฟล์รายเดือน'}"
         >${s.base ? '📦 ตั้งต้น' : 'ตั้งเป็นตั้งต้น'}</button>
-      <button class="btn sm ghost" data-srcdel="${i}" title="เอาไฟล์นี้ออก">✕</button>
+      <button class="btn sm ghost" data-srcdel="${i}" title="เอาไฟล์นี้ออก">✕</button>`}
     </div>`;
   }).join('');
   const total = n0(S.raw.length);
@@ -8360,16 +9033,27 @@ function renderGateSources(){
         : `<p style="font-size:var(--t-xs);color:var(--good-ink);margin-top:9px">
             ✓ มีข้อมูลครบทั้ง ${esc(have.join(' และ '))}</p>`;
     })()}
-    <div style="display:flex;gap:7px;margin-top:11px;flex-wrap:wrap;align-items:center">
-      ${S.sources.some(s => !s.base) && S.sources.some(s => s.base)
+    ${(() => {
+      /* With the database itself in the set, “ล้างทั้งหมด” is not an offer the
+         app can keep — it would have to refuse. The honest button is the one
+         that clears exactly what can be cleared. */
+      const core = S.sources.filter(locked).length;
+      const added = S.sources.filter(s => !s.base && !locked(s)).length;
+      return `<div style="display:flex;gap:7px;margin-top:11px;flex-wrap:wrap;align-items:center">
+      ${added && S.sources.some(s => s.base)
         ? '<button class="btn sm ghost" id="srcClearAdded">ล้างเฉพาะไฟล์ที่เพิ่มเข้ามา</button>' : ''}
-      <button class="btn sm ghost" id="srcClear">ล้างทั้งหมด</button>
-      ${hasBaseData() ? '<button class="btn sm ghost" id="srcRestore">↺ โหลดข้อมูลตั้งต้นที่ฝังมากับไฟล์</button>' : ''}
+      ${core ? '' : '<button class="btn sm ghost" id="srcClear">ล้างทั้งหมด</button>'}
+      ${hasBaseData() && !core
+        ? '<button class="btn sm ghost" id="srcRestore">↺ โหลดข้อมูลตั้งต้นที่ฝังมากับไฟล์</button>' : ''}
       <span style="flex:1"></span>
       <span style="font-size:var(--t-xs);color:var(--muted);align-self:center;max-width:52ch">
-        📦 <b>ตั้งต้น</b> = ไฟล์ฐานที่จะเก็บไว้เสมอ · ไฟล์รายเดือนที่ลากมาทีหลังจะรวมทับด้วย
-        <b>เลขที่งาน</b> ไม่นับซ้ำ · กด ✕ ลบไฟล์ไหนก็ได้ และจะไม่กลับมาเอง</span>
-    </div>
+        ${core
+        ? `🔒 <b>ฐานข้อมูลหลัก</b> ${core} ไฟล์ (QW + WAG) ลบไม่ได้ ทั้งในไฟล์ในเครื่องและบนเว็บ ·
+           ไฟล์รายเดือนที่ลากมาทีหลังจะรวมทับด้วย <b>เลขที่งาน</b> ไม่นับซ้ำ และกด ✕ เอาออกได้`
+        : `📦 <b>ตั้งต้น</b> = ไฟล์ฐานที่จะเก็บไว้เสมอ · ไฟล์รายเดือนที่ลากมาทีหลังจะรวมทับด้วย
+           <b>เลขที่งาน</b> ไม่นับซ้ำ · กด ✕ ลบไฟล์ไหนก็ได้ และจะไม่กลับมาเอง`}</span>
+    </div>`;
+    })()}
   </div>`;
 }
 /* demo dataset — shaped like the real export so the layout can be judged */
