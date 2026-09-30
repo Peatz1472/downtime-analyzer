@@ -3764,10 +3764,13 @@ P.overview = c => {
       sub: chg == null ? 'ยังไม่มีเดือนก่อนหน้าให้เทียบ'
         : `${chg <= 0 ? '▼ ลดลง' : '▲ เพิ่มขึ้น'} ${hr(Math.abs(per.delta))}`,
       tone: tone || 'info', d:3})}
-    ${kpiCard({label: per.curPartial ? `เป้าถึงวันที่ ${per.curDay}` : 'เป้าหมาย (Target)',
+    ${kpiCard({label: per.curPartial ? `เป้าถึงวันที่ ${per.curDay} (จากเป้าเดือน ${n1(tgt)})` : 'เป้าหมาย (Target)',
       raw: per.curPartial ? per.tgtToDate : tgt, dp:1, unit: per.curPartial ? 'ชม.' : 'ชม./เดือน',
+      // the arithmetic in full: the pro-rated figure kept reading as if it had
+      // come from nowhere, when it is the month's target cut to the days so far
       sub: per.curPartial
-        ? `${per.curDay}/${per.curDays} วันของเป้าทั้งเดือน ${n1(tgt)} ชม. (ลด ${S.targetPct}% จากฐาน)`
+        ? `${n1(base)} × ${100 - S.targetPct}% = <b>${n1(tgt)}</b> ชม./เดือน →
+           ${per.curDay}/${per.curDays} วัน = <b>${n1(per.tgtToDate)}</b> ชม.`
         : `ลด ${S.targetPct}% จากฐาน ${n1(base)} ชม.`, tone:'info', d:4})}
     ${kpiCard({label:'ส่วนต่างที่ต้องลด (Gap)', raw:gap, dp:1, unit: per.curPartial ? 'ชม.' : 'ชม./เดือน',
       sub: onTarget
@@ -3795,7 +3798,7 @@ P.overview = c => {
         <div>
           <div class="heroNum tab" style="color:var(--ink2)"><span data-count="${per.curPartial ? per.tgtToDate : tgt}" data-dp="1">0</span></div>
           <div class="eyebrow" style="margin-top:6px">${per.curPartial
-            ? `เป้าถึงวันที่ ${per.curDay} (ชม.)` : 'เป้าหมาย (ชม./เดือน)'}</div>
+            ? `เป้าถึงวันที่ ${per.curDay} (ชม.) · ทั้งเดือน ${n1(tgt)}` : 'เป้าหมาย (ชม./เดือน)'}</div>
         </div>
         <div style="flex:1;min-width:230px">
           <div class="track" style="height:18px">
@@ -5335,8 +5338,10 @@ P.dataedit = c => {
             return `<tr${ex ? ' class="exrow"' : ''}>
               <td style="text-align:center"><input type="checkbox" data-edinc="${esc(r.key)}"${ex ? '' : ' checked'}
                 title="ติ๊ก = นำรายการนี้ไปคิดในทุกกราฟ"></td>
-              <td class="mono" style="font-size:12px;color:var(--muted);white-space:nowrap;
-                overflow:hidden;text-overflow:ellipsis">${esc(r.jobNo || '—')}</td>
+              <td class="mono" style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                <span data-ticket="${esc(r.key)}" title="ดูรายละเอียดใบงานนี้"
+                  style="color:var(--brand);cursor:pointer;text-decoration:underline dotted"
+                  >${esc(r.jobNo || '(ไม่มีเลขที่งาน)')}</span></td>
               <td>${cell(r, 'date', r.date || '')}</td>
               <td>${cell(r, 'branchRaw', branchVal)}</td>
               <td>${cell(r, 'category', r.category)}</td>
@@ -7587,6 +7592,139 @@ P.dataset = c => {
 };
 
 /* ==========================================================================
+   14h. ONE TICKET, IN FULL
+   Every page that lists tickets can open this, because "why is this number
+   what it is" always ends at a single job sheet: what was reported, what the
+   technician found, which clock produced its hours, and whether anything was
+   corrected, cut or filed twice.
+   ========================================================================== */
+
+/** Ticket timestamps are read out of the file as wall-clock text and parsed as
+    UTC, so every calculation treats them as naive local time. Printing them
+    with `fmtWhen` — which formats in the VIEWER's timezone — shifted every one
+    of them by 7 hours here, turning 2 ก.ย. 20:01 into 3 ก.ย. 03:01 and making a
+    correct 1-hour figure look wrong. Read them back the same way they went in.
+    (`fmtWhen` stays as it is: it prints real epoch times, like when a file was
+    loaded, and those genuinely belong in the viewer's timezone.) */
+function fmtStamp(ms){
+  if(ms == null) return '—';
+  const d = new Date(ms), p = n => String(n).padStart(2, '0');
+  const TH = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+  return `${d.getUTCDate()} ${TH[d.getUTCMonth()]} ${String(d.getUTCFullYear() + 543).slice(2)} ` +
+    `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+}
+
+function ticketRow(label, value, note){
+  if(value === '' || value == null) return '';
+  return `<div style="display:grid;grid-template-columns:132px minmax(0,1fr);gap:10px;padding:6px 0;
+       border-bottom:1px solid var(--line)">
+    <span style="font-size:var(--t-xs);color:var(--muted)">${esc(label)}</span>
+    <span style="font-size:var(--t-sm);min-width:0">${value}${note
+      ? `<br><span style="font-size:var(--t-2xs);color:var(--muted)">${note}</span>` : ''}</span></div>`;
+}
+
+function openTicket(key, back){
+  const r = S.raw.map(applyEdits).find(x => x.key === key);
+  if(!r) return;
+  const ex = isExcluded(r);
+  const ed = S.edits[r.key] || {};
+  const dup = typeof dupInfo === 'function' ? dupInfo().get(r.key) : null;
+  const sla = typeof slaPass === 'function' ? slaPass(r) : null;
+  const lim = typeof slaLimit === 'function' ? slaLimit(r) : null;
+  const when = fmtStamp;
+  const yn = v => v === true ? '<span class="chip crit">หยุด</span>'
+    : v === false ? '<span class="chip good">ไม่หยุด</span>' : '<span class="chip">ไม่ระบุ</span>';
+  const hoursNote = r.hoursSource === 'times'
+      ? `คำนวณจากเวลาเริ่ม–ปิดงาน แล้วนับเฉพาะช่วงที่ช่างทำงานได้ ${BIZ.open}:00–${BIZ.close}:00`
+    : r.hoursSource === 'duration' ? 'มาจากคอลัมน์ “ระยะเวลา downtime” ในไฟล์ เพราะไม่มีเวลาเริ่ม/ปิดงาน'
+    : r.hoursSource === 'edited' ? 'ตัวเลขนี้ถูกแก้ด้วยมือในหน้าแก้ไขข้อมูล'
+    : 'ไม่มีทั้งเวลาเริ่ม–ปิดงาน และคอลัมน์ระยะเวลา จึงคิดชั่วโมงไม่ได้';
+  const mismatch = r.durCol != null && r.hoursRaw != null && Math.abs(r.durCol - r.hoursRaw) > 1
+    ? `⚠ คอลัมน์ในไฟล์บอก ${n1(r.durCol)} ชม. ซึ่งไม่ตรงกับเวลาเริ่ม–ปิดงาน (${n1(r.hoursRaw)} ชม.) — ระบบยึดเวลาเริ่ม–ปิดงาน` : '';
+
+  S.drill = {kind: 'ticket', key};
+  $('drill').className = 'open';
+  $('drill').innerHTML = `
+    <div class="scrim" data-closedrill></div>
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;gap:12px;padding:15px 18px;border-bottom:1px solid var(--line)">
+        <div style="min-width:0">
+          <p class="eyebrow">รายละเอียดใบงาน</p>
+          <h3 style="font-size:17px;font-weight:750;margin-top:3px;line-height:1.3">${esc(r.jobNo || '(ไม่มีเลขที่งาน)')}</h3>
+          <p style="font-size:12.5px;color:var(--muted);margin-top:3px">
+            ${esc(fmtDate(r.date))} · ${esc(r.branchCode)} ${esc(clip(String(r.branchName || '').replace(/^\S+\s*/, ''), 22))}
+            ${ex ? ' · <span class="chip crit">✕ ตัดออกแล้ว</span>' : ''}</p>
+        </div>
+        <div style="display:flex;gap:6px;flex:0 0 auto;align-items:flex-start">
+          ${back && back.kind ? `<button class="btn sm" data-drill="${esc(back.kind)}" data-key="${esc(back.key)}">← กลับ</button>` : ''}
+          <button class="btn sm ghost" data-closedrill>✕</button>
+        </div>
+      </div>
+
+      <div style="flex:1;overflow-y:auto;padding:16px 18px">
+        <div class="grid g3" style="gap:9px;margin-bottom:14px">
+          ${[['ชั่วโมงที่นับ', r.hours == null ? '—' : n1(r.hours), r.hours == null ? 'info' : 'crit'],
+             ['เวลาจริง แจ้ง→ปิด', r.hoursRaw == null ? '—' : n1(r.hoursRaw), 'warn'],
+             ['นับใน %Uptime', r.hoursOpen == null ? '—' : n1(r.hoursOpen), 'info']]
+            .map(([l, v, t]) => `<div style="background:var(--surface2);border-radius:11px;padding:10px 12px">
+              <p class="eyebrow">${l}</p>
+              <b class="tab" style="font-size:19px;color:var(--${t}-ink)">${v}</b>
+              <span style="font-size:12px;color:var(--muted)"> ชม.</span></div>`).join('')}
+        </div>
+
+        ${r.lateClose ? `<div class="banner warn" style="margin-bottom:12px"><span class="i">⏳</span>
+          <div style="font-size:13px"><b>ปิดงานช้า</b> — ใบนี้เปิดค้าง ${n1(r.spanDays)} วัน
+            ระบบจึงนับให้เพียง ${hr(r.hours)} ตามเพดาน ${BIZ.capDays} วันทำการ
+            ส่วนที่เหลือเป็นเรื่องการปิดงาน ไม่ใช่เครื่องเสียนาน</div></div>` : ''}
+        ${dup ? `<div class="banner warn" style="margin-bottom:12px"><span class="i">🧾</span>
+          <div style="font-size:13px"><b>ใบงานซ้ำ</b> — แจ้งซ้ำกับใบ <b>${esc(String(dup.of))}</b>
+            (${esc(fmtDate(dup.date))}) ห่างกัน ${n1(dup.gapH)} ชม.${dup.open ? ' และตอนแจ้ง ใบเดิมยังไม่ปิด' : ''}
+            — ชั่วโมงของใบนี้อาจเป็นเครื่องตัวเดิมที่ถูกนับซ้ำ</div></div>` : ''}
+
+        <p class="eyebrow" style="margin-bottom:4px">ใบงานว่าอะไร</p>
+        ${ticketRow('อาการที่แจ้ง', esc(r.detail || '—'))}
+        ${ticketRow('ระบบ / ชุดอุปกรณ์', esc(r.category), r.categoryGuessed ? 'ระบบเดาหมวดให้จากข้อความอาการ' : '')}
+        ${ticketRow('ประเภทงาน', esc(r.jobType || '—'))}
+        ${ticketRow('ลักษณะปัญหา', esc(r.urgency || ''))}
+        ${ticketRow('เครื่องหยุด', yn(r.stopped), esc(r.stoppedRaw || ''))}
+        ${ticketRow('ทีมช่าง', esc(r.team || '—'))}
+
+        <p class="eyebrow" style="margin:14px 0 4px">ช่างบันทึกอะไรไว้</p>
+        ${ticketRow('อาการที่พบ', esc(r.symptom || '—'))}
+        ${ticketRow('สาเหตุ', esc(r.rootCause || '—'))}
+        ${ticketRow('วิธีแก้ไข', esc(r.techFix || '—'))}
+        ${ticketRow('การดำเนินการซ่อม', esc(r.repairStatus || ''))}
+        ${ticketRow('สาเหตุที่ยังไม่ปิดงาน', esc(r.delayReason || ''))}
+
+        <p class="eyebrow" style="margin:14px 0 4px">เวลา และวิธีคิดชั่วโมง</p>
+        ${ticketRow('วันที่แจ้ง', esc(fmtDate(r.date)))}
+        ${ticketRow('เริ่มเสีย', esc(when(r.startMs)))}
+        ${ticketRow('ปิดงาน', esc(when(r.endMs)), r.endMs == null ? 'ไฟล์ยังไม่มีเวลาปิดงานของใบนี้' : '')}
+        ${ticketRow('ที่มาของชั่วโมง', esc(hoursNote), mismatch)}
+        ${sla != null ? ticketRow('SLA งานซ่อม',
+            sla ? '<span class="chip good">ผ่าน</span>' : '<span class="chip crit">ไม่ผ่าน</span>',
+            lim != null ? `กติกา ${n0(lim)} ชม. · ใช้จริง ${r.hours == null ? '—' : n1(r.hours)} ชม.` : '') : ''}
+
+        <p class="eyebrow" style="margin:14px 0 4px">ที่มาของข้อมูล</p>
+        ${ticketRow('ไฟล์ต้นทาง', esc(clip(r.source || '—', 42)), 'แถวที่ ' + n0(r.row))}
+        ${ticketRow('แบรนด์ / สาขา',
+          `<span class="chip">${esc(r.brand)}</span> ${esc(r.branchCode)} ${esc(r.branchName || '')}`)}
+        ${Object.keys(ed).length ? ticketRow('แก้ไขแล้ว',
+          Object.keys(ed).map(k => `<span class="chip warn">${esc(k)}</span>`).join(' '),
+          'ค่าเดิมในไฟล์ยังอยู่ — คืนค่าได้ในหน้าแก้ไขข้อมูล') : ''}
+      </div>
+
+      <div style="padding:13px 18px;border-top:1px solid var(--line);display:flex;gap:8px">
+        <button class="btn sm" data-tkex="${esc(r.key)}" style="flex:1">${ex
+          ? '✓ เอากลับมาคิด' : '✕ ตัดใบนี้ออกจากการคำนวณ'}</button>
+        <button class="btn sm primary" data-drill="branch" data-key="${esc(r.branchCode)}" style="flex:1">
+          ดูทั้งสาขานี้ →</button>
+      </div>
+    </div>`;
+  animate($('drill'));
+}
+
+/* ==========================================================================
    14e. 👷 ทีมช่าง & SLA — what to develop so the team passes SLA
    The question is not "who is slow". Every team's median repair is fine; what
    breaks SLA is a tail of jobs that run for days. So this page separates the
@@ -8746,10 +8884,11 @@ function openDrill(kind, key){
         </div>` : ''}
 
         <div>
-          <p class="eyebrow" style="margin-bottom:8px">ใบงานล่าสุด</p>
+          <p class="eyebrow" style="margin-bottom:8px">ใบงานล่าสุด <span style="color:var(--muted);font-weight:500">— กดที่แถวเพื่อดูรายละเอียดใบนั้น</span></p>
           ${tableHTML([{h:'วันที่'},{h: kind === 'branch' ? 'ระบบ' : 'สาขา'},{h:'อาการ'},
               ...(tech.has ? [{h:'สาเหตุ / วิธีแก้ (ช่าง)'}] : []), {h:'ชม.', num:1}],
-            recs.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 25).map(r => [
+            recs.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 25).map(r => {
+            const cells = [
               esc(fmtDate(r.date)),
               `<span class="st">${esc(clip(kind === 'branch' ? r.category : r.branchCode, 18))}</span>`,
               esc(clip(r.symptom || r.detail || '—', 30)),
@@ -8759,7 +8898,10 @@ function openDrill(kind, key){
               r.hours == null ? '<span style="color:var(--muted)">—</span>'
                 : `<b class="tab">${n1(r.hours)}</b>` + (r.hoursRaw != null && Math.abs(r.hoursRaw - r.hours) > 0.1
                   ? `<br><span style="font-size:var(--t-2xs);color:var(--muted)" title="เวลาจริงตั้งแต่แจ้งจนปิดงาน">จริง ${n1(r.hoursRaw)}</span>` : '') +
-                  (r.lateClose ? '<br><span class="chip warn" style="font-size:var(--t-2xs)">ปิดงานช้า</span>' : '')]),
+                  (r.lateClose ? '<br><span class="chip warn" style="font-size:var(--t-2xs)">ปิดงานช้า</span>' : '')];
+            cells.__attr = ` class="clickrow" data-ticket="${esc(r.key)}" data-back="${esc(kind)}" data-backkey="${esc(key)}"`;
+            return cells;
+            }),
             {maxH: 300})}
         </div>
       </div>
@@ -8827,6 +8969,20 @@ function bindGlobalEvents(){
       render(); return;
     }
     if(t.closest('[data-closedrill]')){ closeDrill(); return; }
+    /* one ticket, from anywhere that lists tickets */
+    const tk = t.closest('[data-ticket]');
+    if(tk){
+      openTicket(tk.dataset.ticket, tk.dataset.back
+        ? {kind: tk.dataset.back, key: tk.dataset.backkey} : null);
+      return;
+    }
+    const tke = t.closest('[data-tkex]');
+    if(tke){
+      const k = tke.dataset.tkex;
+      if(S.excluded[k]) delete S.excluded[k]; else S.excluded[k] = 1;
+      saveEdits(); render(); openTicket(k);
+      return;
+    }
     const drill = t.closest('[data-drill]');
     if(drill){ openDrill(drill.dataset.drill, drill.dataset.key); return; }
     const bso = t.closest('[data-brsort]');
