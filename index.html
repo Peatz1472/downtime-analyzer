@@ -3549,6 +3549,7 @@ const S = {
   editFilter: 'all',     // quick filter on the data editor
   editQuery: '',
   editHideExcluded: false,   // ซ่อนแถวที่ตัดออกแล้วในหน้าแก้ไขข้อมูล
+  followFilter: true,        // หน้าแก้ไขข้อมูล/ชุดข้อมูล เดินตามตัวกรองด้านบนไหม
   quiet: false,        // one render without the entrance animation
   notice: null,        // one-off message about the data that was just loaded
   rc: {},              // root-cause notes, per system
@@ -5196,7 +5197,12 @@ const EDIT_LIMIT = 300;
 /** The rows the editor is currently showing — shared by the page, the bulk
     buttons and the CSV export so all three always mean the same set. */
 function editRows(){
-  const all = S.raw.map(applyEdits);
+  /* The top filter bar used to be ignored here, on the grounds that a broken
+     row must be findable whatever the bar says. The user asked for the
+     opposite — look at QW in September and edit exactly that — so the bar is
+     obeyed by default and `S.followFilter` turns it off in one click. */
+  const every = S.raw.map(applyEdits);
+  const all = S.followFilter ? applyFilters(every, S.f) : every;
   const pick = editFilterFn(S.editFilter);
   const q = S.editQuery.trim().toLowerCase();
   const rows = all.filter(r => {
@@ -5207,11 +5213,11 @@ function editRows(){
     return (r.jobNo + ' ' + r.branchCode + ' ' + r.branchName + ' ' + r.category + ' ' +
             r.detail + ' ' + r.team + ' ' + r.date).toLowerCase().includes(q);
   });
-  return {all, rows};
+  return {all, rows, every};
 }
 
 P.dataedit = c => {
-  const {all, rows} = editRows();
+  const {all, rows, every} = editRows();
   const shown = rows.slice(0, EDIT_LIMIT);
   const dropped = all.filter(isExcluded);
   const droppedHours = sum(dropped.filter(r => r.hours != null), r => r.hours);
@@ -5238,13 +5244,17 @@ P.dataedit = c => {
     <p>ไฟล์ต้นฉบับ<b>ไม่ถูกแก้</b> ทุกอย่างที่แก้ตรงนี้เก็บทับไว้ในเบราว์เซอร์เครื่องนี้เท่านั้น
        กด “คืนค่าเดิมทั้งหมด” เมื่อไรก็กลับไปตรงกับไฟล์ทันที
        ทุกกราฟและ KPI ทุกหน้าจะคำนวณใหม่ทันทีที่แก้ และจะมีแถบเตือนกำกับไว้ว่าตัวเลขไม่ใช่ค่าดิบจากไฟล์แล้ว<br>
-       <b style="color:var(--warn-ink)">หน้านี้เป็นหน้าเดียวที่ไม่สนตัวกรองด้านบน</b> —
-       แสดงทุกแถวในไฟล์เสมอ เพราะต้องหาแถวที่ผิดให้เจอไม่ว่าตัวกรองจะตั้งไว้ยังไง
-       (ใช้ช่องค้นหาและปุ่มกรองในหน้านี้แทน)</p>
+       ${S.followFilter
+         ? `<b style="color:var(--good-ink)">กำลังเดินตามตัวกรองด้านบน</b> —
+            แก้เฉพาะชุดที่กรองไว้ได้เลย${every.length > all.length
+              ? ` · <b>ตัวกรองซ่อนอยู่ ${n0(every.length - all.length)} แถว</b>` : ''}
+            · กดปุ่มด้านล่างเพื่อดูทุกแถวในไฟล์`
+         : `<b style="color:var(--warn-ink)">กำลังแสดงทุกแถวในไฟล์ ไม่สนตัวกรองด้านบน</b> —
+            เหมาะกับตอนไล่หาแถวที่ผิด · กดปุ่มด้านล่างเพื่อกลับไปตามตัวกรอง`}</p>
   </div>
 
   <div class="grid g4" style="margin-bottom:14px">
-    ${kpiCard({label:'รายการทั้งหมดในไฟล์', raw: all.length, unit:'รายการ',
+    ${kpiCard({label: S.followFilter ? 'รายการในชุดที่กรองไว้' : 'รายการทั้งหมดในไฟล์', raw: all.length, unit:'รายการ',
       sub: S.sources.length + ' ไฟล์', tone:'info', d:1})}
     ${kpiCard({label:'นำมาคิด', raw: kept, unit:'รายการ',
       sub: pc(all.length ? kept / all.length * 100 : 0, 0) + ' ของทั้งหมด', tone:'good', d:2,
@@ -5268,6 +5278,9 @@ P.dataedit = c => {
     </div>
     <div class="bd" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--line)">
       <span style="font-size:12.5px;color:var(--muted)">ทำกับ ${n0(rows.length)} รายการที่กรองอยู่ตอนนี้:</span>
+      <button class="btn sm${S.followFilter ? ' on' : ''}" id="edFollow"
+        title="สลับระหว่าง ตามตัวกรองด้านบน กับ ทุกแถวในไฟล์"
+        >${S.followFilter ? '🔗 ตามตัวกรองด้านบน' : '🗂 ทุกแถวในไฟล์'}</button>
       <button class="btn sm${S.editHideExcluded ? ' on' : ''}" id="edHideEx"
         title="ซ่อนรายการที่ตัดออกแล้วจากตาราง (ข้อมูลยังอยู่ กดคืนค่าได้)"
         >${S.editHideExcluded ? '👁 กำลังซ่อนที่ตัดออก' : '🙈 ซ่อนที่ตัดออกแล้ว'}</button>
@@ -7430,10 +7443,15 @@ const monthSpan = set => {
 };
 
 P.dataset = c => {
-  const inv = inventory(c.corrected);
-  const src = bySource(c.corrected);
+  /* Same rule as the editor: the bar is obeyed by default, because "ดูเฉพาะ QW
+     เดือนนี้" is what people mean when they set it. The whole-database view is
+     one click away, and the heading says which one is on screen. */
+  const scope = S.followFilter ? applyFilters(c.corrected, S.f) : c.corrected;
+  const inv = inventory(scope);
+  const src = bySource(scope);
   const per = c.per;
-  const files = S.sources.filter(s => s.kind !== ROSTER_KIND);
+  const files = S.sources.filter(s => s.kind !== ROSTER_KIND)
+    .filter(s => !S.followFilter || src.has(s.name));
   const pending = unsavedAdds();
   const both = inv.brands.length > 1;
 
@@ -7531,9 +7549,13 @@ P.dataset = c => {
   <div class="ph reveal">
     <div class="k">🗄 ชุดข้อมูล</div>
     <h1>ฐานข้อมูลนี้มีอะไรอยู่บ้าง</h1>
-    <p>ทั้งฐานข้อมูล แยกตาม<b>ปี → เดือน</b> และบอกว่าแต่ละเดือนมาจากไฟล์ไหน —
-       หน้านี้<b>ไม่ขึ้นกับตัวกรองด้านบน</b> เพราะมีไว้ตรวจว่าข้อมูลครบและไม่ปนกัน ·
-       กดที่ช่องเดือนเพื่อกรองดูเฉพาะเดือนนั้น</p>
+    <p>แยกตาม<b>ปี → เดือน</b> และบอกว่าแต่ละเดือนมาจากไฟล์ไหน ·
+       กดที่ช่องเดือนเพื่อกรองดูเฉพาะเดือนนั้น<br>
+       ${S.followFilter
+         ? '<b style="color:var(--good-ink)">กำลังเดินตามตัวกรองด้านบน</b> — เห็นเฉพาะชุดที่กรองไว้'
+         : '<b style="color:var(--warn-ink)">กำลังแสดงทั้งฐานข้อมูล</b> — ไม่สนตัวกรองด้านบน'}
+       <button class="btn sm${S.followFilter ? ' on' : ''}" id="dsFollow" style="margin-left:6px"
+         >${S.followFilter ? '🔗 ตามตัวกรอง' : '🗂 ทั้งฐานข้อมูล'}</button></p>
   </div>
 
   ${inv.gaps.length ? `<div class="banner warn reveal" style="margin-bottom:14px">
@@ -9225,6 +9247,7 @@ function bindGlobalEvents(){
     if(t.id === 'aNew'){ openGate(); return; }
     if(t.id === 'gateClose' || t.id === 'gateBack'){ if(S.raw.length) closeGate(); return; }
     if(t.id === 'edHideEx'){ S.editHideExcluded = !S.editHideExcluded; render(); return; }
+    if(t.id === 'edFollow' || t.id === 'dsFollow'){ S.followFilter = !S.followFilter; render(); return; }
     if(t.id === 'undoDel'){ undoRemove(); return; }
     if(t.id === 'undoExc'){
       const k = t.dataset.k;
