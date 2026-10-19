@@ -4493,6 +4493,9 @@ function runningNote(p){
     <div style="flex:1">
       <b>เดือน ${esc(monthLabel(r.month))} ยังไม่จบ — ข้อมูลถึงวันที่ ${r.day}
         (${esc(fmtDate(r.lastDate))})</b>
+      <button class="btn sm" data-setcur="${esc(r.month)}" style="margin-left:8px"
+        title="สลับให้ “ตอนนี้” เป็นเดือนนี้ — ตัวเลขทุกหน้าจะอิงเดือนที่ยังไม่จบ และเทียบช่วงวันเดียวกัน"
+        >ดูเดือน ${esc(monthLabel(r.month))} เลย</button>
       <p style="margin-top:3px;font-size:var(--t-xs);color:var(--muted);line-height:var(--lh-body)">
         เท่าที่มีตอนนี้ <b class="tab" style="color:var(--ink)">${hr(r.hours)}</b> จาก ${n0(r.count)} ใบงาน ·
         เทียบ<b>ช่วงวันเดียวกัน</b>ของเดือน ${esc(monthLabel(r.cmpMonth))}
@@ -8908,9 +8911,9 @@ function renderTop(){
       const p = C.per;
       return `<span style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)">
         <select class="inp" id="fCur" style="width:126px" title="เดือนที่ถือว่าเป็น “ตอนนี้”">
-          ${opt('', 'ล่าสุด · ' + monthLabel(p.autoMonth), S.curMonth)}
+          ${opt('', 'ล่าสุดที่จบแล้ว · ' + monthLabel(p.autoMonth), S.curMonth)}
           ${[...p.months].reverse().map(m => opt(m, monthLabel(m) +
-            (p.complete(m) ? '' : ' (ยังไม่จบ)'), S.curMonth)).join('')}</select>
+            (p.complete(m) ? '' : ' (เดือนนี้ ยังไม่จบ)'), S.curMonth)).join('')}</select>
         เทียบ<select class="inp" id="fCmp" style="width:168px" title="ฐานที่ใช้คิด % และเป้าหมาย">
           ${CMP_MODES.map(m => opt(m[0], m[1], p.mode)).join('')}</select>
         ${p.mode === 'manual' ? `<input class="inp" id="fBase" type="number" min="1" step="10"
@@ -9103,6 +9106,8 @@ function bindGlobalEvents(){
     }
     const drill = t.closest('[data-drill]');
     if(drill){ openDrill(drill.dataset.drill, drill.dataset.key); return; }
+    const sc = t.closest('[data-setcur]');
+    if(sc){ S.curMonth = sc.dataset.setcur; saveView(); render(); return; }
     const bso = t.closest('[data-brsort]');
     if(bso){ S.brSort = bso.dataset.brsort; render(); return; }
     const th = t.closest('[data-th]');
