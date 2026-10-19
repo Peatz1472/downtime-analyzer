@@ -3056,6 +3056,12 @@ const EDITABLE = {
   team:     v => String(v || '').trim() || '(ไม่ระบุทีม)',
   hours:    v => { const n = Number(String(v).replace(/[^0-9.\-]/g, '')); return Number.isFinite(n) && n >= 0 ? n : null; },
   stopped:  v => v === 'yes' ? true : v === 'no' ? false : null,
+  // what the technician found and did — the three columns the new exports
+  // carry. Correctable here as well, because a cause typed in a hurry on a
+  // phone is exactly the kind of text that needs tidying later.
+  symptom:  v => String(v || '').trim(),
+  rootCause:v => String(v || '').trim(),
+  techFix:  v => String(v || '').trim(),
 };
 
 /** Returns the record as corrected, re-deriving anything that depends on an
@@ -5480,6 +5486,9 @@ const ORIG_DISPLAY = {
   team:      r => r.team,
   hours:     r => r.hours != null ? n1(r.hours) : '',
   stopped:   r => r.stopped === true ? 'yes' : r.stopped === false ? 'no' : '',
+  symptom:   r => r.symptom || '',
+  rootCause: r => r.rootCause || '',
+  techFix:   r => r.techFix || '',
 };
 
 /** Store (or clear) one field override. Returns true when anything changed, so
@@ -5603,6 +5612,12 @@ function trendMonths(c){
   const med = ref.length ? ref[Math.floor(ref.length / 2)] : 0;
   let end = tr.length;
   while(end > 1 && med > 0 && counts[end - 1] < med * 0.45) end--;
+  /* A thin tail is one way a part-month shows up; the other is a month that is
+     simply not over yet but already busy — ต.ค. with 85 tickets by the 20th
+     looks normal to a count test and would still be compared against whole
+     months. The period model already knows which months are complete, so ask
+     it rather than guessing from volume. */
+  while(end > 1 && c.per && c.per.complete && !c.per.complete(tr[end - 1].month)) end--;
   return {months: tr.slice(0, end).map(m => m.month), cut: tr.length - end,
           dropped: tr.slice(end).map(m => m.label), tr};
 }
@@ -5632,10 +5647,24 @@ function trendWindow(recs, c){
    wash staff on site against 24 hours with nobody — so the same equipment
    fault is a different job with a different fix in each. Left unset, the job
    covers both, which is right for something genuinely fleet-wide. */
-const actionScopeFn = sc => r =>
-  (sc.kind === 'branch' ? r.branchCode === sc.key : r.category === sc.key) &&
-  (!sc.branch || r.branchCode === sc.branch) &&
-  (!sc.brand || r.brand === sc.brand);
+/* The source system renames its equipment list between exports — the same
+   fault arrives as "สายไฟ,สายเซ็นเซอร์" one month and "สายไฟ / สายเซ็นเซอร์" or
+   "31 - …" the next. An action pinned to the old literal label then silently
+   stops matching anything and reports 0.0 for ever. Compare on a normalised
+   key: drop a leading emoji marker, a leading number, spaces and the
+   punctuation that merely separates the words. */
+const catKey = s => String(s || '')
+  .replace(/^[^\p{L}\p{N}]+/u, '')
+  .replace(/^\d+\s*[-–.)]\s*/, '')
+  .toLowerCase()
+  .replace(/[\s,./()\[\]_+·•-]/g, '');
+const actionScopeFn = sc => {
+  const key = sc.kind === 'branch' ? String(sc.key) : catKey(sc.key);
+  return r =>
+    (sc.kind === 'branch' ? r.branchCode === key : catKey(r.category) === key) &&
+    (!sc.branch || r.branchCode === sc.branch) &&
+    (!sc.brand || r.brand === sc.brand);
+};
 
 /** The live evidence behind one action — recomputed every render from the
     records currently in view, never stored. */
@@ -5723,8 +5752,13 @@ function actionMeasure(a, c){
   const per = c.per;
   const recs = c.measureRecs.filter(actionScopeFn(sc));
   const own = new Map(trend(recs).map(m => [m.month, m]));
-  const h = m => (own.get(m) || {hours: 0}).hours;
   const ok = m => per.complete(m) && per.usable(m);
+  /* Hours are the point, but a scope whose tickets carry no duration at all
+     would report "0 → 0" for ever. When that happens the number of tickets is
+     what there is to measure, and the card says which one it is reading. */
+  const anyHours = recs.some(r => r.hours != null && r.hours > 0);
+  const metric = anyHours ? 'hours' : 'count';
+  const h = m => (own.get(m) || {})[metric] || 0;
   const avg = ms => ms.length ? sum(ms.map(h)) / ms.length : 0;
 
   const anchor = start || due;
@@ -5751,8 +5785,15 @@ function actionMeasure(a, c){
     phase: m <= bEnd ? 'before' : (aDue ? m >= aDue : aStart && m >= aStart) ? 'after' : 'during',
   }));
 
+  /* A scope that has gone quiet is almost always a renamed category, not a
+     solved problem — report it as a broken link rather than as a flat zero. */
+  const months = uniq(recs.map(r => r.month).filter(Boolean)).sort();
+  const lastSeen = months[months.length - 1] || '';
+  const stale = !!lastSeen && !!per.curMonth && lastSeen < addMonth(per.curMonth, -2);
+
   return {
-    state: !before.length ? 'nobefore' : after.length ? 'ok' : 'wait',
+    state: !recs.length ? 'noscope' : !before.length ? 'nobefore' : after.length ? 'ok' : 'wait',
+    metric, lastSeen, stale, scopeCount: recs.length,
     start, due, before, beforeAvg,
     afterStart, afterStartAvg: avg(afterStart), chgStart: chgOf(afterStart),
     afterDue, afterDueAvg: avg(afterDue), chgDue: chgOf(afterDue),
@@ -5764,7 +5805,11 @@ function actionMeasure(a, c){
 
 /** The verdict as a chip: what happened, over how many months, against what. */
 function measureChip(m){
-  if(!m || m.state === 'noscope') return '';
+  if(!m) return '';
+  if(m.state === 'noscope')
+    return `<span class="chip crit" title="ไม่มีใบงานไหนตรงกับขอบเขตของงานนี้เลย — ชื่อชุดอุปกรณ์ในไฟล์ใหม่อาจเปลี่ยนไป">⚠ ไม่เจอใบงานในขอบเขตนี้</span>`;
+  if(m.stale)
+    return `<span class="chip warn" title="ใบงานล่าสุดของขอบเขตนี้คือ ${esc(monthLabel(m.lastSeen))} — ไฟล์ใหม่น่าจะเรียกชื่อชุดอุปกรณ์ต่างออกไป จึงวัดผลต่อไม่ได้">⚠ ขอบเขตเงียบตั้งแต่ ${esc(monthLabel(m.lastSeen))}</span>`;
   if(m.state === 'nodate')
     return `<span class="chip" title="ใส่วันที่เริ่มทำ แล้วระบบจะเทียบก่อน/หลังให้เองจากข้อมูล">📏 ยังไม่ได้ใส่วันที่เริ่ม</span>`;
   if(m.state === 'nobefore')
@@ -5775,8 +5820,10 @@ function measureChip(m){
     return `<span class="chip" title="เคสนี้ไม่มีชั่วโมงเครื่องหยุดทั้งในเดือนก่อนและหลัง (${esc(monthsLabel(m.before))} / ${esc(monthsLabel(m.after))})">— ไม่มีชั่วโมงหยุดทั้งก่อน/หลัง</span>`;
   const t = m.chg <= -10 ? 'good' : m.chg >= 10 ? 'crit' : '';
   const word = t === 'good' ? '▼ ลดลง' : t === 'crit' ? '▲ เพิ่มขึ้น' : '≈ ทรงตัว';
-  const tip = `ก่อนเริ่ม ${n1(m.beforeAvg)} ชม./เดือน (${monthsLabel(m.before)}) → ` +
-    `หลัง${m.basis === 'due' ? 'ครบกำหนด' : 'เริ่มทำ'} ${n1(m.afterAvg)} ชม./เดือน (${monthsLabel(m.after)})` +
+  const unit = m.metric === 'count' ? 'ครั้ง/เดือน' : 'ชม./เดือน';
+  const tip = `ก่อนเริ่ม ${n1(m.beforeAvg)} ${unit} (${monthsLabel(m.before)}) → ` +
+    `หลัง${m.basis === 'due' ? 'ครบกำหนด' : 'เริ่มทำ'} ${n1(m.afterAvg)} ${unit} (${monthsLabel(m.after)})` +
+    (m.metric === 'count' ? ' — เคสนี้ไม่มีใครกรอกชั่วโมง จึงวัดจากจำนวนครั้งแทน' : '') +
     (m.after.length < 2 ? ' — มีแค่ 1 เดือน ยังเร็วไปที่จะสรุป' : '');
   return `<span class="chip ${t}" title="${esc(tip)}">${word} ${t ? signPct(m.chg).replace(/^[+−±]/, '') : signPct(m.chg)}
     หลัง${m.basis === 'due' ? 'ครบกำหนด' : 'เริ่มทำ'} · ${m.after.length} ด.${m.after.length < 2 ? ' ⚠' : ''}</span>`;
@@ -6251,6 +6298,33 @@ function actionResults(acts, cases, meas, c){
         r.__attr = ` class="clickrow" data-actopen="${i}" data-actjump="1" style="cursor:pointer"`;
         return r;
       }))}
+    ${(() => {
+      /* A scope that no longer matches anything is the commonest way this table
+         goes dead, and it is fixable in one click: point the action at whatever
+         the newer exports call the same thing. */
+      const broken = rows.filter(x => x.m.state === 'noscope' || x.m.stale);
+      if(!broken.length) return '';
+      // only what that action's own brand actually reports, or the list offers
+      // a category the brand filter will immediately throw away again
+      const catsFor = brand => pareto(groupBy(
+        c.measureRecs.filter(r => !brand || r.brand === brand), r => r.category), 'hours');
+      return `<div class="banner warn" style="margin:0 16px 12px">
+        <span class="i">🔗</span>
+        <div style="font-size:13px;line-height:1.9">
+          <b>${n0(broken.length)} งานวัดผลต่อไม่ได้ เพราะชื่อชุดอุปกรณ์ในไฟล์ใหม่เปลี่ยนไป</b> —
+          เลือกชื่อที่ไฟล์ใหม่ใช้ แล้วระบบจะเทียบก่อน/หลังให้ทันที
+          ${broken.map(({a, i, m}) => `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:7px">
+            <b style="min-width:160px">${esc(clip(a.title, 28))}</b>
+            ${a.scope.brand ? `<span class="chip">${esc(a.scope.brand)}</span>` : ''}
+            <span style="color:var(--muted)">${m.lastSeen
+              ? 'ใบงานล่าสุด ' + esc(monthLabel(m.lastSeen)) : 'ไม่เจอใบงานเลย'}</span>
+            <select class="inp" data-actscope="${i}" style="height:30px;max-width:330px;font-size:12.5px">
+              <option value="">— เลือกชุดอุปกรณ์ที่ตรงกับงานนี้ —</option>
+              ${catsFor(a.scope.brand).slice(0, 40).map(g => `<option value="${esc(g.key)}"${g.key === a.scope.key ? ' selected' : ''}
+                >${esc(clip(g.key, 42))} · ${n0(g.count)} ใบ · ${n1(g.hours)} ชม.</option>`).join('')}
+            </select></div>`).join('')}
+        </div></div>`;
+    })()}
     <p style="font-size:var(--t-xs);color:var(--muted);padding:10px 16px 14px;line-height:var(--lh-body)">
       ทุกครั้งที่เพิ่มไฟล์เดือนใหม่ ตารางนี้คำนวณใหม่เอง · เทียบเฉพาะใบงานในเคสของงานนั้น (ระบบ/สาขา/แบรนด์ที่ผูกไว้)
       · ใช้เฉพาะเดือนที่จบแล้วและกรอกเวลาครบ · เดือนที่วันเริ่ม/วันกำหนดเสร็จตกอยู่ไม่นับทั้งสองฝั่ง
@@ -7636,6 +7710,17 @@ function fmtStamp(ms){
     `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
 }
 
+/** An editable cell inside the ticket panel — the same override layer the data
+    editor writes to, so a correction made here shows up there and in every
+    chart, and "คืนค่าเดิม" still gets back to exactly what the file says. */
+function tkCell(r, fld, value, multi){
+  const e = S.edits[r.key] || {};
+  return `<span class="edcell${e[fld] !== undefined ? ' chg' : ''}" contenteditable="true" spellcheck="false"
+    data-edit="${esc(r.key)}" data-fld="${fld}" data-tkedit="1"
+    style="display:block;min-height:20px${multi ? ';white-space:pre-wrap' : ''}"
+    >${esc(value == null ? '' : String(value))}</span>`;
+}
+
 function ticketRow(label, value, note){
   if(value === '' || value == null) return '';
   return `<div style="display:grid;grid-template-columns:132px minmax(0,1fr);gap:10px;padding:6px 0;
@@ -7703,18 +7788,29 @@ function openTicket(key, back){
             (${esc(fmtDate(dup.date))}) ห่างกัน ${n1(dup.gapH)} ชม.${dup.open ? ' และตอนแจ้ง ใบเดิมยังไม่ปิด' : ''}
             — ชั่วโมงของใบนี้อาจเป็นเครื่องตัวเดิมที่ถูกนับซ้ำ</div></div>` : ''}
 
-        <p class="eyebrow" style="margin-bottom:4px">ใบงานว่าอะไร</p>
-        ${ticketRow('อาการที่แจ้ง', esc(r.detail || '—'))}
-        ${ticketRow('ระบบ / ชุดอุปกรณ์', esc(r.category), r.categoryGuessed ? 'ระบบเดาหมวดให้จากข้อความอาการ' : '')}
+        <p class="eyebrow" style="margin-bottom:4px">ใบงานว่าอะไร
+          <span style="color:var(--muted);font-weight:500">— ช่องที่มีเส้นใต้ คลิกแล้วพิมพ์แก้ได้เลย</span></p>
+        ${ticketRow('วันที่แจ้ง', tkCell(r, 'date', r.date || ''))}
+        ${ticketRow('สาขา', tkCell(r, 'branchRaw', r.branchName || r.branchCode))}
+        ${ticketRow('อาการที่แจ้ง', tkCell(r, 'detail', r.detail || '', true))}
+        ${ticketRow('ระบบ / ชุดอุปกรณ์', tkCell(r, 'category', r.category),
+          r.categoryGuessed ? 'ระบบเดาหมวดให้จากข้อความอาการ' : '')}
         ${ticketRow('ประเภทงาน', esc(r.jobType || '—'))}
         ${ticketRow('ลักษณะปัญหา', esc(r.urgency || ''))}
-        ${ticketRow('เครื่องหยุด', yn(r.stopped), esc(r.stoppedRaw || ''))}
-        ${ticketRow('ทีมช่าง', esc(r.team || '—'))}
+        ${ticketRow('เครื่องหยุด', `<select class="inp" style="height:26px;font-size:12.5px;width:104px;padding:0 6px"
+            data-edsel="${esc(r.key)}" data-fld="stopped" data-tkedit="1">${
+            [['yes','หยุด'],['no','ไม่หยุด'],['','ไม่ระบุ']].map(([v, lb]) =>
+              `<option value="${v}"${v === (r.stopped === true ? 'yes' : r.stopped === false ? 'no' : '') ? ' selected' : ''}>${lb}</option>`).join('')
+          }</select>`, esc(r.stoppedRaw || ''))}
+        ${ticketRow('ชั่วโมงที่นับ', tkCell(r, 'hours', r.hours != null ? n1(r.hours) : ''),
+          'แก้ตรงนี้ = ใช้ตัวเลขนี้แทนที่ระบบคำนวณ')}
+        ${ticketRow('ทีมช่าง', tkCell(r, 'team', r.team || ''))}
 
-        <p class="eyebrow" style="margin:14px 0 4px">ช่างบันทึกอะไรไว้</p>
-        ${ticketRow('อาการที่พบ', esc(r.symptom || '—'))}
-        ${ticketRow('สาเหตุ', esc(r.rootCause || '—'))}
-        ${ticketRow('วิธีแก้ไข', esc(r.techFix || '—'))}
+        <p class="eyebrow" style="margin:14px 0 4px">ช่างบันทึกอะไรไว้
+          <span style="color:var(--muted);font-weight:500">— แก้/เพิ่มได้เลย</span></p>
+        ${ticketRow('อาการที่พบ', tkCell(r, 'symptom', r.symptom || '', true))}
+        ${ticketRow('สาเหตุ', tkCell(r, 'rootCause', r.rootCause || '', true))}
+        ${ticketRow('วิธีแก้ไข', tkCell(r, 'techFix', r.techFix || '', true))}
         ${ticketRow('การดำเนินการซ่อม', esc(r.repairStatus || ''))}
         ${ticketRow('สาเหตุที่ยังไม่ปิดงาน', esc(r.delayReason || ''))}
 
@@ -9457,8 +9553,25 @@ function bindGlobalEvents(){
       renderEditor('[data-edinc="' + k.replace(/["\\]/g, '\\$&') + '"]');
       return;
     }
+    /* re-point an action whose category the newer exports renamed */
+    const asc = t.closest('[data-actscope]');
+    if(asc){
+      const a = S.actions[Number(asc.dataset.actscope)];
+      if(a && a.scope && asc.value){
+        a.scope.key = asc.value;
+        if(a.scope.kind === 'branch') a.scope.kind = 'category';
+        saveActions(); render();
+      }
+      return;
+    }
     const es = t.closest('[data-edsel]');
-    if(es){ if(setEdit(es.dataset.edsel, es.dataset.fld, es.value)) renderEditor(); return; }
+    if(es){
+      if(setEdit(es.dataset.edsel, es.dataset.fld, es.value)){
+        if(es.dataset.tkedit && S.drill && S.drill.kind === 'ticket'){ render(); openTicket(S.drill.key); }
+        else renderEditor();
+      }
+      return;
+    }
   });
 
   // Saving simulator: live, without a full re-render on every pixel.
@@ -9497,7 +9610,10 @@ function bindGlobalEvents(){
     if(ec){
       const changed = setEdit(ec.dataset.edit, ec.dataset.fld,
         ec.textContent.replace(/\s+/g, ' ').trim());
-      if(changed) editTouched();
+      // an edit made inside the ticket panel redraws the panel, not the table
+      if(changed && ec.dataset.tkedit && S.drill && S.drill.kind === 'ticket'){
+        render(); openTicket(S.drill.key);
+      } else if(changed) editTouched();
       return;
     }
   });
