@@ -8914,6 +8914,22 @@ function renderTop(){
       ${opt('', 'ทุกสาขา', S.f.branch)}${uq(inBrand.map(r => r.branchCode)).map(b => opt(b, b, S.f.branch)).join('')}</select>
     <select class="inp" id="fCat" style="width:158px" title="ระบบ / ชุดอุปกรณ์">
       ${opt('', 'ทุกระบบ', S.f.category)}${uq(inBrand.map(r => r.category)).map(b => opt(b, clip(b, 26), S.f.category)).join('')}</select>
+    ${(() => {
+      /* The year is a shortcut over the two month pickers, not a third date
+         field: picking one sets from/to to that year's first and last month
+         that actually exist in the data, so the months stay selectable and the
+         view never lands on an empty range. Hidden when everything is one year
+         — a dropdown with a single choice is furniture. */
+      const years = uniq(months.map(m => m.slice(0, 4))).sort();
+      if(years.length < 2) return '';
+      const cur = (S.f.from && S.f.to && S.f.from.slice(0, 4) === S.f.to.slice(0, 4))
+        ? S.f.from.slice(0, 4) : '';
+      const label = y => 'ปี ' + String(Number(y) + 543).slice(2);
+      return `<select class="inp" id="fYear" style="width:96px" title="เลือกทั้งปี">
+        ${opt('', 'ทุกปี', cur)}${years.map(y =>
+          `<option value="${esc(y)}"${y === cur ? ' selected' : ''}
+            title="ปี พ.ศ. ${esc(String(Number(y) + 543))}">${esc(label(y))}</option>`).join('')}</select>`;
+    })()}
     <select class="inp" id="fFrom" style="width:112px" title="ตั้งแต่เดือน">
       ${opt('', 'ตั้งแต่แรก', S.f.from)}${months.map(m => opt(m, monthLabel(m), S.f.from)).join('')}</select>
     <select class="inp" id="fTo" style="width:112px" title="ถึงเดือน">
@@ -9541,6 +9557,19 @@ function bindGlobalEvents(){
     if(t.id === 'rcBrSel'){ S.rcBranch = t.value; render(); return; }
     if(map[t.id]){
       S.f[map[t.id]] = t.value;
+      render(); return;
+    }
+    if(t.id === 'fYear'){
+      const y = t.value;
+      if(!y){ S.f.from = ''; S.f.to = ''; }
+      else {
+        const inY = uniq(C.corrected.map(r => r.month).filter(m => m && m.slice(0, 4) === y)).sort();
+        if(!inY.length) return;
+        S.f.from = inY[0]; S.f.to = inY[inY.length - 1];
+      }
+      /* "ตอนนี้" must land inside the year just chosen, otherwise the whole
+         page compares a month that is no longer in view. */
+      S.curMonth = '';
       render(); return;
     }
     if(t.id === 'fBase'){ const v = Number(t.value); S.baseline = v > 0 ? v : null; saveView(); render(); return; }
