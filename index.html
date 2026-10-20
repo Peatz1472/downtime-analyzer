@@ -1201,10 +1201,17 @@ function groupBy(recs,keyFn){
 function pareto(groups,metric){
   const rows=[...groups].sort((a,b)=>b[metric]-a[metric]);
   const total=sum(rows,r=>r[metric])||1;
-  let run=0;
+  /* Downtime adds up in the SAME order the chart is sorted in. On the
+     frequency Pareto that answers "if I close the N most frequent items,
+     how many hours do I actually win back?" — which is not the same list
+     as the downtime Pareto, and that gap is the whole point of the page. */
+  const totalHours=sum(rows,r=>r.hours||0);
+  let run=0,runH=0;
   return rows.map(r=>{
-    const before=run/total*100; run+=r[metric];
-    return {...r,share:r[metric]/total*100,cum:run/total*100,vital:before<80-1e-9,total};
+    const before=run/total*100; run+=r[metric]; runH+=r.hours||0;
+    return {...r,share:r[metric]/total*100,cum:run/total*100,
+      cumHours:runH,cumHoursShare:totalHours?runH/totalHours*100:0,
+      vital:before<80-1e-9,total,totalHours};
   });
 }
 const median=a=>{ if(!a.length) return 0; const s=[...a].sort((x,y)=>x-y);
@@ -1377,7 +1384,9 @@ function paretoSVG(rows,opt){
       <div><span>สัดส่วน</span><em>${pc(r.share)}</em></div>
       <div><span>สะสม</span><em>${pc(r.cum)}</em></div>
       <div><span>จำนวนครั้ง</span><em>${n0(r.count)}</em></div>
-      <div><span>Downtime</span><em>${hr(r.hours)}</em></div>`);
+      <div><span>Downtime</span><em>${hr(r.hours)}</em></div>
+      <div><span>Downtime สะสม</span><em>${hr(r.cumHours)}${
+        opt.metric==='hours'?'':' ('+pc(r.cumHoursShare,0)+')'}</em></div>`);
     pts.push([cx,padT+plotH-plotH*r.cum/100]);
     const t=el('text',{x:0,y:0,class:'axisT','text-anchor':'end',
       transform:`translate(${cx+4},${padT+plotH+10}) rotate(-38)`},svg);
@@ -1388,7 +1397,10 @@ function paretoSVG(rows,opt){
       stroke:'var(--s2)','stroke-width':2,'stroke-linejoin':'round'},svg);
     pts.forEach((p,i)=>{ const c=el('circle',{cx:p[0],cy:p[1],r:4,fill:'var(--surface)',
       stroke:'var(--s2)','stroke-width':2},svg);
-      bindTip(c,`<b>${esc(rows[i].key)}</b><div><span>สะสมถึงตัวนี้</span><em>${pc(rows[i].cum)}</em></div>`); });
+      bindTip(c,`<b>${esc(rows[i].key)}</b>
+        <div><span>สะสมถึงตัวนี้</span><em>${pc(rows[i].cum)}</em></div>
+        <div><span>Downtime สะสม</span><em>${hr(rows[i].cumHours)}${
+          opt.metric==='hours'?'':' ('+pc(rows[i].cumHoursShare,0)+')'}</em></div>`); });
   }
   el('line',{x1:padL,x2:padL+plotW,y1:padT+plotH,y2:padT+plotH,class:'axisL'},svg);
   return svg;
@@ -4014,6 +4026,9 @@ P.pareto = c => {
   }
   const vitalC = byCount.filter(r => r.vital).length;
   const vitalH = byHours.filter(r => r.vital).length;
+  const blank = {cum: 0, cumHours: 0, cumHoursShare: 0, totalHours: 0};
+  const lastC = byCount.filter(r => r.vital).slice(-1)[0] || blank;
+  const lastH = byHours.filter(r => r.vital).slice(-1)[0] || blank;
   return `
   <div class="ph reveal">
     <div class="k">📊 Double Pareto</div>
@@ -4037,14 +4052,18 @@ P.pareto = c => {
         ${legend([{label:'สัดส่วนของจำนวนครั้ง', color:'var(--s1)'},{label:'สะสม', color:'var(--s2)'},{label:'เส้น 80%', color:'var(--good)', dash:1}])}
         <div data-ch="pf"></div>
         <p style="font-size:12.5px;color:var(--muted);margin-top:9px">
-          ${vitalC} รายการแรกรวมกันได้ ${pc((byCount.filter(r => r.vital).slice(-1)[0]||{cum:0}).cum, 0)} ของจำนวนครั้งทั้งหมด</p>
+          ${vitalC} รายการแรกรวมกันได้ ${pc(lastC.cum, 0)} ของจำนวนครั้งทั้งหมด<br>
+          ปิดครบ ${vitalC} รายการนี้ = ได้ downtime คืน <b>${hr(lastC.cumHours)}</b>
+          (${pc(lastC.cumHoursShare, 0)} ของ ${hr(lastC.totalHours)} ในมุมมองนี้)</p>
       </div>`, 'Frequency Pareto')}
     ${bare('คำถามที่ 2 — “อะไรทำให้เครื่องหยุดนาน?”',
       `<div class="bd">
         ${legend([{label:'สัดส่วนของชั่วโมงที่หยุด', color:'var(--s1)'},{label:'สะสม', color:'var(--s2)'},{label:'เส้น 80%', color:'var(--good)', dash:1}])}
         <div data-ch="pd"></div>
         <p style="font-size:12.5px;color:var(--muted);margin-top:9px">
-          ${vitalH} รายการแรกรวมกันได้ ${pc((byHours.filter(r => r.vital).slice(-1)[0]||{cum:0}).cum, 0)} ของ Downtime ทั้งหมด</p>
+          ${vitalH} รายการแรกรวมกันได้ ${pc(lastH.cum, 0)} ของ Downtime ทั้งหมด<br>
+          ปิดครบ ${vitalH} รายการนี้ = ได้ downtime คืน <b>${hr(lastH.cumHours)}</b>
+          (จากทั้งหมด ${hr(lastH.totalHours)} ในมุมมองนี้)</p>
       </div>`, 'Downtime Pareto')}
   </div>
 
