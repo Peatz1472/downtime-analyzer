@@ -351,6 +351,74 @@ svg.chart text{font-family:var(--font)}
 .banner.info{background:var(--info-soft);border:1px solid color-mix(in srgb,var(--info) 35%,transparent);color:var(--info-ink)}
 .banner.good{background:var(--good-soft);border:1px solid color-mix(in srgb,var(--good) 35%,transparent);color:var(--good-ink)}
 
+/* ==========================================================================
+   GRAPHIC VOCABULARY — the shapes that replaced the paragraphs
+   Every page used to open with three to six lines of Thai before the reader
+   reached a single number. The rule now: a quantity becomes a number, a
+   proportion becomes a shape, a state becomes a chip, and the method behind
+   them stays — one click away, and open on paper.
+   ========================================================================== */
+
+/* The fact bar: what the page is counting, countable at a glance. */
+.factbar{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}
+.fact{display:inline-flex;align-items:center;gap:7px;padding:5px 11px 6px;border-radius:10px;
+  background:var(--surface2);border:1px solid var(--line);line-height:1.55}
+.fact .fi{font-size:14px;line-height:1.2;flex:0 0 auto}
+.fact b{font-size:var(--t-sm);font-weight:750;color:var(--ink);font-variant-numeric:tabular-nums}
+.fact em{font-size:var(--t-2xs);font-weight:600;color:var(--muted);font-style:normal}
+.fact.good{background:var(--good-soft);border-color:color-mix(in srgb,var(--good) 32%,transparent)}
+.fact.warn{background:var(--warn-soft);border-color:color-mix(in srgb,var(--warn) 32%,transparent)}
+.fact.crit{background:var(--crit-soft);border-color:color-mix(in srgb,var(--crit) 36%,transparent)}
+.fact.info{background:var(--info-soft);border-color:color-mix(in srgb,var(--info) 32%,transparent)}
+.fact.good b{color:var(--good-ink)} .fact.warn b{color:var(--warn-ink)}
+.fact.crit b{color:var(--crit-ink)} .fact.info b{color:var(--info-ink)}
+
+/* The dot grid. One dot = one hundredth, so "810 จาก 921 ใบ" becomes a shape
+   the eye measures instead of a sentence the reader has to divide. */
+.dots{display:grid;grid-template-columns:repeat(20,1fr);gap:3px;width:100%;max-width:252px}
+.dots i{display:block;aspect-ratio:1;border-radius:2px;background:var(--surface3)}
+.dots i.on{background:var(--brand)}
+.dots.good i.on{background:var(--good)} .dots.warn i.on{background:var(--warn)}
+.dots.crit i.on{background:var(--crit)} .dots.info i.on{background:var(--info)}
+
+/* Method kept, not deleted: collapsed on screen, forced open when printing so
+   the PDF still carries every rule the numbers rest on. */
+details.why{margin-top:9px;border-top:1px dashed var(--line);padding-top:7px}
+details.why > summary{cursor:pointer;font-size:var(--t-2xs);font-weight:700;color:var(--muted);
+  list-style:none;display:inline-flex;align-items:center;gap:5px;padding:3px 0}
+details.why > summary::-webkit-details-marker{display:none}
+details.why > summary::before{content:'›';display:inline-block;font-weight:800;font-size:13px;
+  transition:transform .16s ease}
+details.why[open] > summary::before{transform:rotate(90deg)}
+details.why > summary:hover{color:var(--ink2)}
+details.why .whybody{font-size:var(--t-xs);color:var(--muted);line-height:var(--lh-body);
+  margin-top:7px;max-width:94ch}
+details.why .whybody b{color:var(--ink2)}
+details.why .whybody li{margin-top:3px}
+html.printfit details.why > summary{display:none}
+html.printfit details.why{border-top:none;padding-top:2px;margin-top:5px}
+
+/* Banner, graphic form: a headline you read in one breath, the proof beside
+   it as shapes and chips, the reasoning underneath on demand. */
+.banner .bt{font-size:var(--t-base);font-weight:750;line-height:var(--lh-tight)}
+.banner .brow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:9px}
+.banner .bgraph{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin-top:9px}
+
+/* A labelled bar with the target drawn on it, for every "เกินเป้าอยู่ X" line.
+   The target label hangs BELOW the bar: above it, a notch sitting near the
+   right-hand end collided with the figure the caller had already right-aligned
+   over the bar, and the two numbers overprinted each other. */
+.tgtbar{position:relative;height:16px;border-radius:999px;background:var(--surface3);
+  overflow:visible;margin-bottom:17px}
+.tgtbar > i{position:absolute;left:0;top:0;bottom:0;border-radius:999px}
+.tgtbar > u{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink);text-decoration:none;
+  border-radius:2px}
+.tgtbar > u::after{content:attr(data-l);position:absolute;left:50%;transform:translateX(-50%);
+  top:calc(100% + 4px);font-size:var(--t-2xs);font-weight:700;color:var(--ink);white-space:nowrap}
+/* …and a notch at either extreme pins its label inside the bar's own width. */
+.tgtbar > u.lo::after{left:0;transform:none}
+.tgtbar > u.hi::after{left:auto;right:0;transform:none}
+
 /* empty state */
 .empty{text-align:center;padding:44px 20px;color:var(--muted);font-size:var(--t-sm)}
 .empty b{display:block;font-size:var(--t-lg);color:var(--ink);margin-bottom:7px}
@@ -904,14 +972,20 @@ function parseDuration(s){
 }
 /* ---- when downtime actually accrues --------------------------------------
    QW opens 08:00 and closes 20:00, WAG runs unattended around the clock, but a
-   technician is only on the job 09:00–18:00. So a machine that breaks at 15:00
+   technician is only on the job 09:00–17:00. So a machine that breaks at 15:00
    and is running again at 10:00 the next morning was down for 3 + 1 = 4
    countable hours, not 19: nothing could have been done overnight.
    A job that starts AND finishes on the same day counts in full — it was dealt
    with while the shop was open, so the clock on the wall is the honest number.
    Past `capDays` working days the figure stops describing a machine and starts
    describing a ticket nobody closed, so it is capped there and flagged. */
-const BIZ={open:9,close:18,capDays:3};
+/* The repair shift is 08:00–17:00 and the first hour goes on preparation, so a
+   technician is actually on the job 09:00–17:00 — eight hours, confirmed by the
+   user 2026-11-09. (It counted to 18:00 until then, which made every downtime
+   figure in the system an hour a day too generous.) This window is NOT the
+   shop's opening hours — those are 08:00–20:00 for QW and round the clock for
+   WAG, and they live in OPEN_HOURS below for %Uptime. */
+const BIZ={open:9,close:17,capDays:3};
 const DAY_MS_=86400000;
 const dayOf=ms=>new Date(ms).toISOString().slice(0,10);
 const atHour=(day,h)=>Date.parse(day+'T'+String(h).padStart(2,'0')+':00:00Z');
@@ -3139,9 +3213,9 @@ function runCounters(root){
     requestAnimationFrame(step);
   });
 }
-/** Fills every .track > i to its data-pct. */
+/** Fills every .track > i and .tgtbar > i to its data-pct. */
 function runTracks(root){
-  (root || document).querySelectorAll('.track > i[data-pct]').forEach(el => {
+  (root || document).querySelectorAll('.track > i[data-pct], .tgtbar > i[data-pct]').forEach(el => {
     const pct = Math.max(0, Math.min(100, Number(el.dataset.pct) || 0));
     if(REDUCED){ el.style.width = pct + '%'; return; }
     requestAnimationFrame(() => requestAnimationFrame(() => { el.style.width = pct + '%'; }));
@@ -3282,6 +3356,236 @@ function storyBars(rows, opt){
         ${esc(opt.fmt ? opt.fmt(r) : n1(r.value))}
       </span>
     </button>`).join('');
+}
+
+/* ==========================================================================
+   GRAPHIC VOCABULARY — the shapes that pages use instead of paragraphs
+   --------------------------------------------------------------------------
+   This file exists because of one review: "ตัวหนังสือมันเยอะไปคนดูจะงง".
+   The dashboard is opened in front of managers, other departments and the
+   brand owners, and every page used to begin with three to six lines of Thai
+   before the reader reached a single number.
+
+   The rule these helpers encode:
+     a quantity   → a number, big and tabular
+     a proportion → a shape (bar, ring, dot grid)
+     a sequence   → a sparkline, with the empty slots still drawn
+     a state      → a chip
+     a method     → kept, but one click away — and open on paper
+
+   Nothing is deleted. MEMORY.md is explicit that a figure the system drops,
+   or a rule a number rests on, has to be visible somewhere on screen; the
+   `why()` block below is that somewhere, and `settleStatic` opens every one of
+   them before the PDF is laid out.
+   ========================================================================== */
+
+/** The strip that replaced the page lede: each fact is an icon, a number and
+    a word. Reads in any order, survives translation, and costs one line where
+    the paragraph cost four. */
+function factBar(facts){
+  const out = (facts || []).filter(Boolean).map(f => `<span class="fact ${f.tone || ''}"${
+    f.title ? ` title="${esc(f.title)}"` : ''}>${
+    f.ic ? `<span class="fi">${f.ic}</span>` : ''}<b>${f.v}</b>${f.l ? `<em>${esc(f.l)}</em>` : ''}</span>`).join('');
+  return out ? `<div class="factbar">${out}</div>` : '';
+}
+
+/** Page header. `facts` replaces the prose lede; `lede` stays available for the
+    rare page whose opening really is a sentence, and is capped at one line. */
+function pageHead(o){
+  return `<div class="ph reveal">
+    <div class="k">${o.k}</div>
+    <h1>${o.h1}</h1>
+    ${o.lede ? `<p>${o.lede}</p>` : ''}
+    ${factBar(o.facts)}
+  </div>`;
+}
+
+/** One dot per hundredth. `part` of `whole` becomes something the eye measures
+    rather than something the reader divides. */
+function dotGrid(part, whole, opt){
+  opt = opt || {};
+  const n = opt.n || 100;
+  const on = whole > 0 ? Math.round(Math.min(1, part / whole) * n) : 0;
+  let cells = '';
+  for(let i = 0; i < n; i++) cells += `<i class="${i < on ? 'on' : ''}"></i>`;
+  return `<span class="dots ${opt.tone || ''}"${opt.style ? ` style="${opt.style}"` : ''}${
+    opt.title ? ` title="${esc(opt.title)}"` : ''}>${cells}</span>`;
+}
+
+/** A composition bar. Where a dot grid goes blank — 22 rows out of 2,010 is
+    one dot in a hundred and reads as "nothing" — this keeps the small slice
+    visible at a floor width while the labels carry the true figures. */
+function stackBar(segs, opt){
+  opt = opt || {};
+  const total = segs.reduce((a, s) => a + (s.v || 0), 0) || 1;
+  const shown = segs.filter(s => s.v > 0);
+  return `<div style="min-width:0;flex:1">
+    <span style="display:flex;height:${opt.h || 14}px;border-radius:999px;overflow:hidden;
+      background:var(--surface3);gap:1px">${shown.map(s => `<i title="${esc(s.l)} ${n0(s.v)}"
+      style="display:block;flex:0 0 auto;width:${Math.max(s.v / total * 100, opt.floor || 1.5)}%;
+      background:${s.c}"></i>`).join('')}</span>
+    <span style="display:flex;flex-wrap:wrap;gap:11px;margin-top:6px">${shown.map(s => `
+      <span style="display:inline-flex;align-items:center;gap:5px;font-size:var(--t-2xs);color:var(--muted)">
+        <i style="width:9px;height:9px;border-radius:2px;background:${s.c};flex:0 0 auto"></i>
+        <b class="tab" style="color:var(--ink);font-weight:700">${n0(s.v)}</b>${esc(s.l)}</span>`).join('')}</span>
+  </div>`;
+}
+
+/** A ring for a single percentage — the shape a "x%" sentence wanted to be. */
+function ringMini(pct, opt){
+  opt = opt || {};
+  const s = opt.size || 58, w = opt.w || 7, r = (s - w) / 2, cx = s / 2;
+  const c = 2 * Math.PI * r, p = Math.max(0, Math.min(100, pct || 0));
+  const col = opt.color || 'var(--brand)';
+  return `<svg width="${s}" height="${s}" viewBox="0 0 ${s} ${s}" role="img"
+    aria-label="${esc(opt.alt || (n0(p) + '%'))}" style="flex:0 0 auto">
+    <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="var(--surface3)" stroke-width="${w}"/>
+    <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${col}" stroke-width="${w}"
+      stroke-linecap="round" stroke-dasharray="${c * p / 100} ${c}"
+      transform="rotate(-90 ${cx} ${cx})"/>
+    <text x="${cx}" y="${cx + (opt.sub ? 0 : 4)}" text-anchor="middle"
+      font-size="${opt.fs || 15}" font-weight="750" fill="var(--ink)">${opt.center != null ? esc(opt.center) : n0(p) + '%'}</text>
+    ${opt.sub ? `<text x="${cx}" y="${cx + 13}" text-anchor="middle" font-size="9"
+      fill="var(--muted)">${esc(opt.sub)}</text>` : ''}
+  </svg>`;
+}
+
+/** A column per slot. Empty slots are drawn as gaps, never skipped — a quiet
+    month must not be able to masquerade as a busy one by disappearing. */
+function sparkBars(items, opt){
+  opt = opt || {};
+  const W = opt.w || 300, H = opt.h || 46, gap = opt.gap || 4, base = 1;
+  const vals = items.map(i => i.v || 0);
+  if(!vals.length) return '';
+  const max = Math.max(...vals, opt.min || 1);
+  const bw = (W - gap * (items.length - 1)) / items.length;
+  const bars = items.map((it, i) => {
+    const h = vals[i] > 0 ? Math.max(3, vals[i] / max * (H - base - 2)) : 0;
+    const fill = it.color || (vals[i] === max ? (opt.maxColor || 'var(--crit)') : (opt.color || 'var(--s1)'));
+    return h ? `<rect x="${(bw + gap) * i}" y="${H - base - h}" width="${bw}" height="${h}" rx="2"
+      fill="${fill}"><title>${esc(it.t || '')}</title></rect>` : '';
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none"
+    role="img" aria-label="${esc(opt.alt || '')}" style="display:block">
+    <rect x="0" y="${H - base}" width="${W}" height="${base}" fill="var(--line2)"/>${bars}</svg>`;
+}
+
+/** A bar with the target drawn on it. Every "สูงกว่าเป้า X ชม." sentence is
+    this picture: how far along, where the line was, how far past it. */
+function targetBar(now, target, opt){
+  opt = opt || {};
+  const max = Math.max(now, target, 0.0001) * 1.08;
+  const nowPct = Math.min(100, now / max * 100), tgtPct = Math.min(100, target / max * 100);
+  const over = now > target;
+  // keep the notch's label inside the bar when the notch sits at either end
+  const side = tgtPct > 78 ? ' hi' : tgtPct < 22 ? ' lo' : '';
+  return `<div class="tgtbar"${opt.title ? ` title="${esc(opt.title)}"` : ''}>
+    <i data-pct="${nowPct}" style="background:var(--${over ? 'crit' : 'good'})"></i>
+    <u class="${side.trim()}" style="left:${tgtPct}%"
+      data-l="${esc(opt.tlabel || ('เป้า ' + n1(target)))}"></u>
+  </div>`;
+}
+
+/** Ranked rows with a bar each — the shape a list of "A 12 ชม., B 9 ชม." wants.
+    Rows are `{name, v, label, href, title}`; the top row carries the accent. */
+function barList(rows, opt){
+  opt = opt || {};
+  const max = Math.max(...rows.map(r => r.v || 0), 0.0001);
+  return rows.map((r, i) => `
+    <div style="display:grid;grid-template-columns:${opt.rank === false ? '' : '20px '}minmax(0,1fr) auto;
+      gap:9px;align-items:center;padding:4px 0"${r.attr || ''}>
+      ${opt.rank === false ? '' : `<span class="tab" style="font-size:var(--t-2xs);color:var(--muted);text-align:right">${i + 1}</span>`}
+      <span style="min-width:0">
+        <span style="display:block;font-size:var(--t-sm);overflow:hidden;text-overflow:ellipsis;
+          white-space:nowrap" title="${esc(r.title || r.name)}">${esc(r.name)}</span>
+        <span class="track" style="height:6px;margin-top:4px"><i data-pct="${(r.v || 0) / max * 100}"
+          style="background:${r.color || (i ? 'var(--line2)' : 'var(--s2)')}"></i></span>
+      </span>
+      <b class="tab" style="font-size:var(--t-sm);white-space:nowrap">${r.label}</b>
+    </div>`).join('');
+}
+
+/** A legend is two swatches and two words — not a sentence describing colours. */
+function legendRow(items){
+  return `<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">${items.map(i => `
+    <span style="display:inline-flex;align-items:center;gap:6px;font-size:var(--t-2xs);color:var(--muted)">
+      <i style="width:11px;height:11px;border-radius:3px;background:${i.c};flex:0 0 auto;
+        ${i.dashed ? 'background:none;border:1.5px dashed ' + i.c + ';' : ''}"></i>${esc(i.l)}</span>`).join('')}</div>`;
+}
+
+/** ▲ / ▼ with the size of the move. Replaces "เพิ่มขึ้น 93.4 ชม. (+14.3%)". */
+function deltaChip(chg, delta, opt){
+  opt = opt || {};
+  if(chg == null && delta == null) return `<span class="chip">ยังไม่มีตัวเทียบ</span>`;
+  const down = (delta != null ? delta : chg) <= 0;
+  const good = opt.upIsGood ? !down : down;
+  const parts = [];
+  if(delta != null) parts.push(n1(Math.abs(delta)) + (opt.unit || ' ชม.'));
+  if(chg != null) parts.push(signPct(chg));
+  return `<span class="chip ${good ? 'good' : 'crit'}">${down ? '▼' : '▲'} ${parts.join(' · ')}</span>`;
+}
+
+/** The method behind the numbers: collapsed on screen, open on paper.
+    This is the only place prose is allowed to live at length. */
+function why(summary, body){
+  return `<details class="why"><summary>${esc(summary)}</summary>
+    <div class="whybody">${body}</div></details>`;
+}
+
+/** The day as a bar, with the hours that count shaded. One drawing instead of
+    the paragraph every page used to repeat.
+
+    The band is the window a TECHNICIAN can be on the job — not the shop's
+    opening hours. The shops run 08:00–20:00 (QW) or around the clock (WAG);
+    the repair shift is 08:00–17:00 and the first hour goes on preparation, so
+    work on site starts at 09:00. Calling this band “ร้านเปิด” was wrong on
+    screen and must not come back. */
+function hoursWindowBar(opt){
+  opt = opt || {};
+  const from = BIZ.open, to = BIZ.close;
+  const L = from / 24 * 100, W = (to - from) / 24 * 100;
+  const h = opt.h || 24;
+  const tick = (left, text, on) => `<span style="position:absolute;left:${left}%;transform:translateX(-50%);
+    font-size:var(--t-2xs);color:var(--${on ? 'txt' : 'muted'});font-weight:${on ? 700 : 400};
+    top:${h + 4}px;white-space:nowrap">${text}</span>`;
+  return `<div style="position:relative;height:${h + 22}px">
+    <div style="position:relative;height:${h}px;border-radius:7px;background:var(--surface3);overflow:hidden">
+      <div style="position:absolute;left:${L}%;width:${W}%;top:0;bottom:0;background:var(--s1)"></div>
+      <span style="position:absolute;left:${L + W / 2}%;transform:translateX(-50%);top:${(h - 15) / 2}px;
+        font-size:var(--t-2xs);font-weight:700;color:#fff;white-space:nowrap">🔧 ช่างเข้าซ่อมได้ · นับช่วงนี้</span>
+    </div>
+    ${tick(0, '0:00')}${tick(L, String(from).padStart(2, '0') + ':00', 1)}
+    ${tick(L + W, String(to).padStart(2, '0') + ':00', 1)}${tick(100, '24:00')}
+  </div>`;
+}
+
+/** The hour rule, as one fold the pages can share instead of each repeating it
+    as a grey paragraph. */
+function hoursRuleWhy(){
+  return why('ชั่วโมง downtime นับยังไง', `${hoursWindowBar()}
+    <ul style="margin:9px 0 0;padding-left:17px">
+      <li>นับเฉพาะเวลาที่ช่างเข้าซ่อมได้ <b>${BIZ.open}:00–${BIZ.close}:00</b>
+        (กะช่าง 08:00–17:00 เผื่อเตรียมงาน 1 ชม.) — เครื่องเสียนอกช่วงนี้ไม่มีใครซ่อมได้ จึงไม่นับ</li>
+      <li>งานที่<b>จบภายในวันเดียวกัน</b> นับเวลาจริงเต็ม ไม่ตัดตามช่วงเวลา</li>
+      <li>ใบที่เปิดค้างเกิน ${BIZ.capDays} วันทำการ นับสูงสุด
+        <b>${n0(BIZ.capDays * (BIZ.close - BIZ.open))} ชม.</b> แล้วขึ้นธง “ปิดงานช้า”
+        — กันใบที่ลืมปิดไม่ให้กลืนยอดทั้งเดือน</li>
+      <li>เวลาเริ่ม–ปิดงานในใบคือตัวตั้ง ช่อง “ระยะเวลา downtime” เป็นตัวสำรอง
+        และถ้าสองค่าไม่ตรงกัน ระบบขึ้นธงแทนที่จะเชื่อ</li>
+    </ul>`);
+}
+
+/** Banner in graphic form: one headline, the proof as shapes, the reasoning
+    folded away. `graphic` and `chips` are optional; `body` goes in the fold. */
+function bannerV(o){
+  return `<div class="banner ${o.tone || 'info'} reveal" style="margin-bottom:14px">
+    <span class="i">${o.ic || 'ℹ'}</span>
+    <div style="flex:1;min-width:0">
+      <div class="bt">${o.title}</div>
+      ${o.graphic ? `<div class="bgraph">${o.graphic}</div>` : ''}
+      ${o.chips ? `<div class="brow">${o.chips}</div>` : ''}
+      ${o.body ? why(o.why || 'ทำไมถึงเตือนเรื่องนี้', o.body) : ''}
+    </div></div>`;
 }
 
 /* ==========================================================================
@@ -3567,7 +3871,11 @@ const S = {
   editFilter: 'all',     // quick filter on the data editor
   editQuery: '',
   editHideExcluded: false,   // ซ่อนแถวที่ตัดออกแล้วในหน้าแก้ไขข้อมูล
-  followFilter: true,        // หน้าแก้ไขข้อมูล/ชุดข้อมูล เดินตามตัวกรองด้านบนไหม
+  /* One switch per page, not one switch for both. They were a single flag, so
+     flipping the data-inventory page to "whole database" silently stopped the
+     editor obeying a filter the user never touched on that page. */
+  edFollow: true,            // หน้าแก้ไขข้อมูล เดินตามตัวกรองด้านบนไหม
+  dsFollow: true,            // หน้าชุดข้อมูล เดินตามตัวกรองด้านบนไหม
   quiet: false,        // one render without the entrance animation
   notice: null,        // one-off message about the data that was just loaded
   rc: {},              // root-cause notes, per system
@@ -3689,35 +3997,62 @@ function tableHTML(cols, rows, opt){
 const toneOfShare = p => p >= 20 ? 'crit' : p >= 10 ? 'orange' : p >= 5 ? 'warn' : 'info';
 const estimate = '<span class="chip info" title="ตัวเลขประมาณการ ยังไม่ใช่ผลจริง">ESTIMATE</span>';
 
-/** Data-completeness banner. Never let a low number read as an improvement. */
+/** Data-completeness banner. Never let a low number read as an improvement.
+    The warning used to be four lines of Thai naming one month. It is now the
+    coverage of every month drawn side by side: a reader sees which months are
+    short, and how short, before reading a word. */
 function coverageBanner(c){
   const bad = c.tr.filter(m => m.coverage < 80);
   if(!bad.length) return '';
   const worst = [...bad].sort((a,b) => a.coverage - b.coverage)[0];
-  return `<div class="banner warn reveal" style="margin-bottom:14px">
-    <span class="i">⚠</span>
-    <div><b>DATA QUALITY WARNING</b><br>
-      ข้อมูลเดือน ${esc(worst.label)} กรอกระยะเวลาครบเพียง <b>${pc(worst.coverage,0)}</b>
-      ${bad.length > 1 ? `(และอีก ${bad.length-1} เดือนที่ต่ำกว่า 80%) ` : ''}
-      อาจทำให้ Downtime ของเดือนนั้นดู<b>ต่ำกว่าความเป็นจริง</b> —
-      อย่าตีความว่าผลงานดีขึ้นจนกว่าข้อมูลจะครบ
-    </div></div>`;
+  /* Every month, in order, so the gaps keep their position in time. Below 80%
+     the bar turns red — the threshold is the colour, not a sentence. */
+  const bars = sparkBars(c.tr.map(m => ({
+    v: Math.max(m.coverage, 2), t: m.label + ' · กรอกครบ ' + pc(m.coverage, 0) + ' (' + n0(m.count) + ' ใบ)',
+    color: m.coverage < 80 ? 'var(--crit)' : m.coverage < 95 ? 'var(--warn)' : 'var(--good)',
+  })), {h: 34, min: 100, alt: 'ความครบถ้วนของข้อมูลรายเดือน'});
+  return bannerV({
+    tone: 'warn', ic: '⚠',
+    title: `ข้อมูล ${n0(bad.length)} เดือนยังกรอกไม่ครบ — เดือนพวกนี้ห้ามอ่านว่าดีขึ้น`,
+    graphic: `<span style="flex:1;min-width:200px;max-width:420px">${bars}
+        <span style="display:flex;justify-content:space-between;font-size:var(--t-2xs);color:var(--muted);margin-top:2px">
+          <span>${esc(c.tr[0] ? c.tr[0].label : '')}</span><span>ความครบถ้วนรายเดือน</span>
+          <span>${esc(c.tr.length ? c.tr[c.tr.length - 1].label : '')}</span></span></span>
+      ${legendRow([{c:'var(--good)', l:'ครบ 95%+'}, {c:'var(--warn)', l:'80–95%'}, {c:'var(--crit)', l:'ต่ำกว่า 80%'}])}`,
+    chips: `<span class="chip crit">ต่ำสุด ${esc(worst.label)} · ${pc(worst.coverage, 0)}</span>
+      <button class="btn sm" data-go="quality">ดูว่าขาดอะไรบ้าง</button>`,
+    why: 'ทำไมเดือนที่กรอกไม่ครบถึงดูดีเกินจริง',
+    body: `ชั่วโมง downtime คิดได้เฉพาะใบงานที่มีเวลาเริ่ม–ปิดงาน ใบที่ไม่มีเวลาจะ<b>หายไปจากยอดชั่วโมง</b>
+      ไม่ได้ถูกนับเป็นศูนย์ เดือนที่กรอกครบน้อยจึงมียอดชั่วโมงต่ำกว่าความจริงเสมอ
+      — ต่ำเพราะข้อมูลขาด ไม่ใช่เพราะเครื่องเสียน้อยลง
+      เดือนที่ต่ำกว่า 80% ระบบไม่นำไปใช้เป็นฐานเปรียบเทียบ และไม่ควรนำไปสรุปว่าผลงานดีขึ้น`,
+  });
 }
 
 /** Corrections must never be invisible: if the numbers no longer match the raw
-    file, every page says so and links to the editor. */
+    file, every page says so and links to the editor. The dot grid is there so
+    the size of the change is visible without doing the division. */
 function editBanner(c){
   if(!c.editCount && !c.dropped.length) return '';
-  const bits = [];
-  if(c.dropped.length) bits.push(`<b>ไม่นำมาคิด ${n0(c.dropped.length)} รายการ</b> (${hr(c.droppedHours)})`);
-  if(c.editCount) bits.push(`<b>แก้ไขแล้ว ${n0(c.editCount)} รายการ</b>`);
-  return `<div class="banner info reveal" style="margin-bottom:14px">
-    <span class="i">🗂</span>
-    <div>ตัวเลขในหน้านี้คิดจากข้อมูล<b>ที่คุณปรับแล้ว</b> — ${bits.join(' · ')}
-      จึงไม่ตรงกับไฟล์ต้นฉบับโดยตั้งใจ
-      <button class="btn sm" style="margin-left:8px" data-go="dataedit">ดู / แก้ไขข้อมูล</button>
-      <button class="btn sm ghost" data-editreset="1">คืนค่าเดิมทั้งหมด</button>
-    </div></div>`;
+  const whole = c.corrected ? c.corrected.length : 0;
+  const touched = c.dropped.length + c.editCount;
+  return bannerV({
+    tone: 'info', ic: '🗂',
+    title: 'ตัวเลขหน้านี้คิดจากข้อมูลที่คุณปรับแล้ว — ตั้งใจให้ไม่ตรงกับไฟล์ต้นฉบับ',
+    graphic: whole ? stackBar([
+      {v: whole - touched, l:'ใช้ตามไฟล์เดิม', c:'var(--line2)'},
+      {v: c.editCount, l:'แก้ไขแล้ว', c:'var(--info)'},
+      {v: c.dropped.length, l:'ไม่นำมาคิด', c:'var(--crit)'},
+    ]) : '',
+    chips: `${c.dropped.length ? `<span class="chip">🚫 ไม่นำมาคิด ${n0(c.dropped.length)} ใบ · ${hr(c.droppedHours)}</span>` : ''}
+      ${c.editCount ? `<span class="chip">✏️ แก้ไขแล้ว ${n0(c.editCount)} ใบ</span>` : ''}
+      <button class="btn sm" data-go="dataedit">ดู / แก้ไขข้อมูล</button>
+      <button class="btn sm ghost" data-editreset="1">คืนค่าเดิมทั้งหมด</button>`,
+    why: 'การปรับข้อมูลไปกระทบอะไรบ้าง',
+    body: `การแก้และการตัดออกถูกนำไปใช้<b>ก่อน</b>ตัวกรองทุกตัว ทุกหน้าจึงเห็นชุดข้อมูลเดียวกัน
+      — KPI, Pareto, เมทริกซ์, รายสัปดาห์ และไฟล์ PDF ล้วนคิดจากชุดที่ปรับแล้ว
+      ไฟล์ต้นฉบับไม่เคยถูกแก้ ทุกอย่างเก็บทับไว้ในเบราว์เซอร์เครื่องนี้เท่านั้น กด “คืนค่าเดิมทั้งหมด” เมื่อไรก็กลับไปตรงกับไฟล์`,
+  });
 }
 
 /* ==========================================================================
@@ -3755,22 +4090,26 @@ P.overview = c => {
   const tone = chgTone(chg);
   const moved = chg == null ? 'ยังไม่มีเดือนก่อนหน้าให้เทียบ'
     : `${chg <= 0 ? '▼ ลดลง' : '▲ เพิ่มขึ้น'} ${hr(Math.abs(per.delta))} (${signPct(chg)}) เทียบกับ${per.baseName}`;
-  const note = periodNote(per);
 
   return `
-  <div class="ph reveal">
-    <div class="k">🚨 Downtime Control Center</div>
-    <h1>ตอนนี้ Downtime ของเราดีขึ้นหรือแย่ลง?</h1>
-    <p>ช่วงข้อมูล ${esc(monthLabel(o.first))} – ${esc(monthLabel(o.last))} ·
-       ${n0(o.n)} งานแจ้งซ่อม · ${o.branches} สาขา ·
-       ${S.f.stoppedOnly ? '<b>นับเฉพาะงานที่เครื่องหยุดจริง</b>' : '<b style="color:var(--warn-ink)">นับทุกใบงาน (รวมงานที่เครื่องไม่หยุด)</b>'}</p>
-  </div>
+  ${pageHead({
+    k: '🚨 Downtime Control Center',
+    h1: 'ตอนนี้ Downtime ของเราดีขึ้นหรือแย่ลง?',
+    facts: [
+      {ic:'🗓', v: esc(monthLabel(o.first)) + ' – ' + esc(monthLabel(o.last)), l:'ช่วงข้อมูล'},
+      {ic:'📋', v: n0(o.n), l:'ใบงาน'},
+      {ic:'📍', v: n0(o.branches), l:'สาขา'},
+      S.f.stoppedOnly
+        ? {ic:'⛔', v:'เฉพาะเครื่องหยุด', l:'ตัวกรอง', tone:'info', title:'นับเฉพาะใบงานที่ระบุว่าเครื่องหยุดให้บริการจริง'}
+        : {ic:'⚠️', v:'ทุกใบงาน', l:'รวมงานที่เครื่องไม่หยุด', tone:'warn'},
+    ],
+  })}
 
   ${editBanner(c)}
   ${runningNote(per)}
   ${coverageBanner(c)}
 
-  <div class="grid g5" style="margin-bottom:${note ? 8 : 14}px">
+  <div class="grid g5" style="margin-bottom:8px">
     ${kpiCard({label:`Downtime เดือน ${curL}`, raw:cur, dp:1, unit:'ชม.',
       sub:`${n0(per.curCount)} ใบงาน${per.curPartial ? ' · <b style="color:var(--warn-ink)">ยังไม่จบเดือน</b>' : ''}` +
         (onTarget ? '' : ' · <b style="color:var(--crit-ink)">เกินเป้า</b>'),
@@ -3798,12 +4137,12 @@ P.overview = c => {
                           : `↓ ต้องลดอีกเท่านี้ในเดือน ${curL}`),
       tone: onTarget ? 'good' : 'crit', pct: progress, d:5})}
   </div>
-  ${note ? `<p class="reveal" style="font-size:var(--t-xs);color:var(--muted);margin:0 0 14px">${note}</p>` : ''}
-  <p class="reveal" style="font-size:var(--t-xs);color:var(--muted);margin:0 0 14px">
-    ⏱ ชั่วโมง downtime นับเฉพาะเวลาที่ช่างทำงานได้ <b>${BIZ.open}:00–${BIZ.close}:00</b> ·
-    งานที่จบภายในวันเดียวกันนับ<b>เวลาจริง</b> · ใบที่เปิดค้างเกิน ${BIZ.capDays} วันทำการ
-    นับสูงสุด ${n0(BIZ.capDays * (BIZ.close - BIZ.open))} ชม. แล้วขึ้นธง “ปิดงานช้า”
-    <button class="btn sm ghost" data-go="quality" style="padding:2px 8px">ดูรายการที่ติดธง</button></p>
+  <div class="reveal" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 14px">
+    ${noteChips(per)}
+    <span class="chip">⏱ ${BIZ.open}:00–${BIZ.close}:00 เท่านั้นที่นับเป็น downtime</span>
+    <button class="btn sm ghost" data-go="quality" style="padding:2px 8px">ดูรายการที่ติดธง</button>
+  </div>
+  <div class="reveal" style="margin:-8px 0 14px">${hoursRuleWhy()}</div>
 
   <section class="card ${onTarget ? '' : 'crit'} reveal" id="hero" data-d="2" style="margin-bottom:14px">
     <div style="position:relative;z-index:1">
@@ -3957,11 +4296,16 @@ P.problems = c => {
   const mv = monthCompare(c.measureRecs, per);
   const better = mv.filter(r => r.delta < -0.05), worse = mv.filter(r => r.delta > 0.05);
   return `
-  <div class="ph reveal">
-    <div class="k">🔥 Problems</div>
-    <h1>อะไรทำให้เครื่องหยุด?</h1>
-    <p>ดูสองมุมคู่กันเสมอ — “อะไรเสียบ่อย” กับ “อะไรทำให้หยุดนาน” ไม่ใช่เรื่องเดียวกัน</p>
-  </div>
+  ${pageHead({
+    k: '🔥 Problems',
+    h1: 'อะไรทำให้เครื่องหยุด?',
+    facts: [
+      {ic:'🔁', v:'เสียบ่อย', l:'มุมที่ 1', tone:'info'},
+      {ic:'⏱', v:'หยุดนาน', l:'มุมที่ 2 — คนละเรื่องกัน', tone:'crit'},
+      {ic:'🧩', v: n0(byHours.length), l:'ระบบ/ชุดอุปกรณ์'},
+      {ic:'📋', v: n0(o.n), l:'ใบงาน'},
+    ],
+  })}
   ${catchAllWarning(byHours, o.hours)}
 
   ${bare(`📊 เดือน ${monthLabel(per.curMonth)} เทียบกับ${per.baseName} — อะไรลดลง อะไรเพิ่มขึ้น`,
@@ -4030,11 +4374,16 @@ P.pareto = c => {
   const lastC = byCount.filter(r => r.vital).slice(-1)[0] || blank;
   const lastH = byHours.filter(r => r.vital).slice(-1)[0] || blank;
   return `
-  <div class="ph reveal">
-    <div class="k">📊 Double Pareto</div>
-    <h1>สองคำถามที่ต้องตอบ</h1>
-    <p>Pareto เดียวตอบได้แค่ครึ่งเดียว — ต้องดูทั้งความถี่และชั่วโมงพร้อมกันถึงจะเลือกงานถูก</p>
-  </div>
+  ${pageHead({
+    k: '📊 Double Pareto',
+    h1: 'สองคำถามที่ต้องตอบ',
+    facts: [
+      {ic:'🔁', v:'เสียกี่ครั้ง', l:'Pareto ซ้าย', tone:'info'},
+      {ic:'⏱', v:'หยุดกี่ชั่วโมง', l:'Pareto ขวา', tone:'crit'},
+      {ic:'🧩', v: n0(byHours.length), l:'ระบบที่นำมาเรียง'},
+      {ic:'📋', v: n0(o.n), l:'ใบงาน'},
+    ],
+  })}
   ${catchAllWarning(byHours, o.hours)}
 
   ${contrast ? `<div class="banner info reveal" style="margin-bottom:14px">
@@ -4104,11 +4453,15 @@ P.priority = c => {
     </div>`;
   const P_TONE = {P1:'crit', P2:'orange', P3:'warn', P4:''};
   return `
-  <div class="ph reveal">
-    <div class="k">🎯 Priority</div>
-    <h1>ควรแก้อะไรก่อน?</h1>
-    <p>ตอบผู้บริหารได้ว่า “ทำไมต้องแก้ตัวนี้ก่อน” ด้วยตัวเลข ไม่ใช่ความรู้สึก</p>
-  </div>
+  ${pageHead({
+    k: '🎯 Priority',
+    h1: 'ควรแก้อะไรก่อน?',
+    facts: [
+      {ic:'🧩', v: n0(scored.length), l:'รายการที่จัดอันดับ'},
+      {ic:'📋', v: n0(o.n), l:'ใบงาน'},
+      {ic:'🔢', v:'เรียงด้วยตัวเลข', l:'ไม่ใช่ความรู้สึก', tone:'info'},
+    ],
+  })}
 
   ${bare('Frequency × Downtime — Priority Matrix',
     `<div class="bd"><div data-ch="mx"></div></div>`,
@@ -4472,7 +4825,7 @@ function uptimeCard(u, label, partialNote){
             เสียไป ${n1(r.down)} ชม.</p></div>`).join('')}
       </div>` : ''}
       <p style="font-size:var(--t-2xs);color:var(--muted);margin-top:10px">
-        นับ downtime เฉพาะช่วงที่ร้านเปิด (QW 08:00–20:00 · WAG 24 ชม.) ซึ่งต่างจากชั่วโมงที่ใช้วัดงานช่าง (09:00–18:00) ·
+        นับ downtime เฉพาะช่วงที่ร้านเปิด (QW 08:00–20:00 · WAG 24 ชม.) ซึ่งต่างจากชั่วโมงที่ใช้วัดงานช่าง (09:00–17:00) ·
         สาขาที่ไม่มีใบงานในเดือนนั้นถือว่าเปิดได้เต็มเวลา และถูกนับในตัวหารด้วย${partialNote || ''}</p>
     </div>`, 'เวลาที่ควรเปิดทั้งหมด − ชั่วโมงที่เครื่องเสียตอนร้านเปิด ÷ เวลาที่ควรเปิดทั้งหมด');
 }
@@ -4503,28 +4856,47 @@ function momStrip(p, n){
 /** The month in progress, said out loud. Without this, dropping in this
     month's export moves no number on the page — the month is (rightly) not
     counted yet — and the update looks like it did nothing at all. */
+/** The partial month, drawn rather than described. The paragraph this replaced
+    had to be read twice to see that it was comparing like with like; two bars
+    of the same length scale say it at a glance, and the day counter shows how
+    much of the month the left-hand bar actually covers. */
 function runningNote(p){
   const r = p.running;
   if(!r) return '';
   const t = chgTone(r.chg, 10);
+  const max = Math.max(r.hours, r.cmpHours, 0.0001);
+  const row = (label, hours, count, color) => `
+    <div style="display:grid;grid-template-columns:72px minmax(0,1fr) auto;gap:9px;align-items:center">
+      <span style="font-size:var(--t-2xs);color:var(--muted);text-align:right">${esc(label)}</span>
+      <span class="track" style="height:13px"><i data-pct="${hours / max * 100}" style="background:${color}"></i></span>
+      <b class="tab" style="font-size:var(--t-sm);white-space:nowrap">${hr(hours)}
+        <span style="font-weight:500;color:var(--muted);font-size:var(--t-2xs)">${n0(count)} ใบ</span></b>
+    </div>`;
   return `<div class="banner ${t === 'good' ? 'good' : t === 'crit' ? 'crit' : 'info'} reveal" style="margin-bottom:14px">
     <span class="i">🕒</span>
-    <div style="flex:1">
-      <b>เดือน ${esc(monthLabel(r.month))} ยังไม่จบ — ข้อมูลถึงวันที่ ${r.day}
-        (${esc(fmtDate(r.lastDate))})</b>
-      <button class="btn sm" data-setcur="${esc(r.month)}" style="margin-left:8px"
-        title="สลับให้ “ตอนนี้” เป็นเดือนนี้ — ตัวเลขทุกหน้าจะอิงเดือนที่ยังไม่จบ และเทียบช่วงวันเดียวกัน"
-        >ดูเดือน ${esc(monthLabel(r.month))} เลย</button>
-      <p style="margin-top:3px;font-size:var(--t-xs);color:var(--muted);line-height:var(--lh-body)">
-        เท่าที่มีตอนนี้ <b class="tab" style="color:var(--ink)">${hr(r.hours)}</b> จาก ${n0(r.count)} ใบงาน ·
-        เทียบ<b>ช่วงวันเดียวกัน</b>ของเดือน ${esc(monthLabel(r.cmpMonth))}
-        (วันที่ 1–${r.day}) ที่ทำได้
-        <b class="tab" style="color:var(--ink)">${hr(r.cmpHours)}</b>
-        ${r.chg == null ? '' : `→ <b style="color:${t === 'good' ? 'var(--good-ink)' : t === 'crit' ? 'var(--crit-ink)' : 'var(--ink)'}">${
-          r.chg <= 0 ? 'ลดลง' : 'เพิ่มขึ้น'} ${signPct(r.chg).replace(/^[+−±]/, '')}</b>`}<br>
-        ตัวเลข “ตอนนี้” ด้านล่างยังเป็นเดือน ${esc(monthLabel(p.curMonth))} อยู่
-        และจะเปลี่ยนเป็น ${esc(monthLabel(r.month))} เมื่อข้อมูลครบเดือน —
-        ครึ่งเดือนเทียบกับเต็มเดือนจะดูเหมือนดีขึ้นเสมอ</p>
+    <div style="flex:1;min-width:0">
+      <div class="bt">${esc(monthLabel(r.month))} ยังไม่จบ — ข้อมูลถึงวันที่ ${r.day} จาก ${r.days} วัน</div>
+      <div style="display:grid;gap:6px;margin-top:10px;max-width:520px">
+        <div style="display:grid;grid-template-columns:72px minmax(0,1fr) auto;gap:9px;align-items:center">
+          <span style="font-size:var(--t-2xs);color:var(--muted);text-align:right">เดือนนี้ไปถึง</span>
+          <span class="track" style="height:7px"><i data-pct="${r.day / r.days * 100}" style="background:var(--muted)"></i></span>
+          <b class="tab" style="font-size:var(--t-2xs);color:var(--muted);white-space:nowrap">${esc(fmtDate(r.lastDate))}</b>
+        </div>
+        ${row(esc(monthLabel(r.month)) + ' 1–' + r.day, r.hours, r.count, t === 'good' ? 'var(--good)' : t === 'crit' ? 'var(--crit)' : 'var(--info)')}
+        ${row(esc(monthLabel(r.cmpMonth)) + ' 1–' + r.day, r.cmpHours, r.cmpCount, 'var(--line2)')}
+      </div>
+      <div class="brow">
+        ${r.chg == null ? '<span class="chip">ยังไม่มีช่วงเดียวกันให้เทียบ</span>' : deltaChip(r.chg, r.hours - r.cmpHours)}
+        <span class="chip">เทียบวันต่อวัน 1–${r.day}</span>
+        <button class="btn sm" data-setcur="${esc(r.month)}"
+          title="สลับให้ “ตอนนี้” เป็นเดือนนี้ — ตัวเลขทุกหน้าจะอิงเดือนที่ยังไม่จบ และเทียบช่วงวันเดียวกัน"
+          >ดูเดือน ${esc(monthLabel(r.month))} เลย</button>
+      </div>
+      ${why('ทำไมตัวเลขด้านล่างยังไม่เปลี่ยนเป็นเดือนนี้',
+        `ตัวเลข “ตอนนี้” ทั้งหน้ายังเป็นเดือน <b>${esc(monthLabel(p.curMonth))}</b> ซึ่งเป็นเดือนเต็มล่าสุด
+         และจะเปลี่ยนเป็น ${esc(monthLabel(r.month))} เมื่อข้อมูลครบเดือน —
+         <b>ครึ่งเดือนเทียบกับเต็มเดือนจะดูเหมือนดีขึ้นเสมอ</b> สองแท่งด้านบนจึงตัดให้เหลือ
+         วันที่ 1–${r.day} ของทั้งสองเดือนก่อนเทียบ`)}
     </div>
   </div>`;
 }
@@ -4558,6 +4930,22 @@ function moversHTML(rows, p, n){
 
 /** The standing note under every headline number: which month, against what,
     and which month was left out and why. */
+/** The same standing note as chips rather than a grey sentence, for the pages
+    that show it on screen. `periodNote` stays for the places that need the
+    plain string (the executive report builds a sentence out of it). */
+function noteChips(p){
+  const out = [];
+  if(p.curPartial)
+    out.push(`<span class="chip warn">⚠ ${esc(monthLabel(p.curMonth))} ยังไม่จบเดือน</span>`);
+  else if(p.partial && p.months.includes(p.partial.month))
+    out.push(`<span class="chip">🕒 ${esc(monthLabel(p.partial.month))} ยังไม่จบ · ยังไม่นำมาเทียบ</span>`);
+  const skipped = p.months.filter(m => m < p.curMonth && p.complete(m) && !p.usable(m));
+  if(skipped.length && p.mode !== 'manual')
+    out.push(`<span class="chip" title="เดือนที่กรอกระยะเวลาไม่ถึง 60% ไม่ถูกนำมาใช้เป็นฐานเทียบ"
+      >⤼ ข้าม ${skipped.length} เดือนที่ข้อมูลไม่พอ</span>`);
+  return out.join('');
+}
+
 function periodNote(p){
   const bits = [];
   if(p.curPartial)
@@ -4576,11 +4964,20 @@ P.repeat = c => {
   const top = rs.list.slice(0, 12);
   const worst = rs.list[0];
   return `
-  <div class="ph reveal">
-    <div class="k">🔁 Repeat Failure</div>
-    <h1>ปัญหาเดิมกำลังกลับมา</h1>
-    <p>“เกิดซ้ำ” = ระบบเดิม ที่สาขาเดิม เสียตั้งแต่ ${S.minRepeat} ครั้งขึ้นไป — สัญญาณว่ายังแก้ที่อาการ ไม่ได้แก้ที่สาเหตุ</p>
-  </div>
+  ${pageHead({
+    k: '🔁 Repeat Failure',
+    h1: 'ปัญหาเดิมกำลังกลับมา',
+    facts: [
+      {ic:'🔁', v:'≥ ' + n0(S.minRepeat) + ' ครั้ง', l:'ถึงนับว่าซ้ำ', tone:'crit'},
+      {ic:'🧩', v:'ระบบเดิม', l:'📍 ที่สาขาเดิม'},
+      {ic:'📋', v: n0(rs.pairs), l:'คู่ที่เข้าเกณฑ์'},
+      {ic:'⏱', v: hr(rs.hours), l:'หยุดจากการซ้ำ', tone:'crit'},
+    ],
+  })}
+  <div class="reveal" style="margin:-6px 0 14px">${why('ทำไมของที่ซ้ำสำคัญกว่าของที่ใหญ่',
+    'ปัญหาที่กลับมาซ้ำที่เดิมแปลว่าการแก้ครั้งก่อน<b>แก้ที่อาการ ไม่ได้แก้ที่สาเหตุ</b> ' +
+    'ของชิ้นใหญ่ที่เสียครั้งเดียวอาจกินชั่วโมงมากกว่า แต่แก้จบแล้วจบเลย ' +
+    'ส่วนของที่ซ้ำจะกินชั่วโมงไปเรื่อย ๆ ทุกเดือนจนกว่าจะไปถึงสาเหตุจริง')}</div>
 
   <div class="grid g4" style="margin-bottom:14px">
     ${kpiCard({label:'คู่ปัญหาที่เกิดซ้ำ', raw:rs.pairs, unit:'คู่', sub:'ระบบเดิม + สาขาเดิม', tone:'crit', d:1})}
@@ -4713,11 +5110,23 @@ P.branch = c => {
     return `<b class="tab" style="color:var(--${down ? 'good' : 'crit'}-ink)">${down ? '▼' : '▲'} ${n1(Math.abs(m.delta))}</b>`;
   };
   return `
-  <div class="ph reveal">
-    <div class="k">📍 Branch</div>
-    <h1>สาขาไหนต้องส่งทีมไปก่อน?</h1>
-    <p>Risk Score รวม Downtime · จำนวนครั้ง · Downtime ต่อครั้ง · ปัญหาเกิดซ้ำ — เทียบกับสาขาที่แย่ที่สุดในมุมมองนี้</p>
-  </div>
+  ${pageHead({
+    k: '📍 Branch',
+    h1: 'สาขาไหนต้องส่งทีมไปก่อน?',
+    facts: [
+      {ic:'📍', v: n0(br.length), l:'สาขาในมุมมองนี้'},
+      {ic:'📋', v: n0(o.n), l:'ใบงาน'},
+      {ic:'🎯', v:'Risk Score', l:'เทียบกับสาขาที่แย่ที่สุด', tone:'info'},
+    ],
+  })}
+  <div class="reveal" style="margin:-6px 0 14px">${why('Risk Score คิดจากอะไร',
+    'รวม 4 อย่างเข้าด้วยกัน แล้วเทียบกับสาขาที่แย่ที่สุดในมุมมองที่กรองอยู่ ' +
+    '(100 คะแนน = สาขาที่แย่ที่สุด ไม่ใช่คะแนนเต็มที่ตั้งไว้ล่วงหน้า)' +
+    '<ul style="margin:7px 0 0;padding-left:17px">' +
+    '<li><b>Downtime รวม</b> — ชั่วโมงที่เครื่องหยุดทั้งหมดของสาขานั้น</li>' +
+    '<li><b>จำนวนครั้ง</b> — เสียบ่อยแค่ไหน</li>' +
+    '<li><b>Downtime ต่อครั้ง</b> — เสียแต่ละทีกินเวลานานไหม</li>' +
+    '<li><b>ปัญหาเกิดซ้ำ</b> — ระบบเดิมที่สาขานั้นกลับมาเสียอีกกี่คู่</li></ul>')}</div>
 
   <div class="grid g4" style="margin-bottom:14px">
     ${kpiCard({label:'สาขาทั้งหมด', raw:br.length, unit:'สาขา',
@@ -4833,12 +5242,16 @@ P.saving = c => {
   const scen = rows.slice(0, 3);
   const scenAll = sum(scen.map(r => savingOf(r, o.months, 40)));
   return `
-  <div class="ph reveal">
-    <div class="k">💰 Saving Simulator</div>
-    <h1>ถ้าเราแก้ปัญหานี้ได้ จะลดได้เท่าไร?</h1>
-    <p>เลื่อนแถบเพื่อจำลองว่าถ้าลดปัญหาแต่ละเรื่องได้กี่ % แล้วรวมกันจะถึงเป้าหรือยัง —
-       ตัวเลขทั้งหมดเป็น <b>ประมาณการ (Estimate)</b> จนกว่าจะมีผล Before/After จริง</p>
-  </div>
+  ${pageHead({
+    k: '💰 Saving Simulator',
+    h1: 'ถ้าเราแก้ปัญหานี้ได้ จะลดได้เท่าไร?',
+    facts: [
+      {ic:'🎚', v:'เลื่อนแถบ', l:'จำลองว่าลดได้กี่ %', tone:'info'},
+      {ic:'🎯', v: hr(need), l:'ต้องลดให้ได้', tone:'crit'},
+      {ic:'⚠️', v:'ประมาณการ', l:'จนกว่าจะมีผลจริง', tone:'warn',
+        title:'ตัวเลขทั้งหมดเป็น Estimate จนกว่าจะมีผล Before/After จริงในหน้า Action Plan'},
+    ],
+  })}
 
   <div class="grid g5" style="margin-bottom:14px">
     ${kpiCard({label:'Baseline', raw:base, dp:1, unit:'ชม./เดือน', sub:esc(c.per.baseName), tone:'warn', d:1})}
@@ -4961,15 +5374,19 @@ P.quality = c => {
     TEMPLATE_ROW: ['แถวตัวอย่างในไฟล์', 'เซลล์มีข้อความเดียวกับหัวคอลัมน์ — ข้ามให้แล้ว ควรลบที่ต้นทาง'],
     NOT_A_FAILURE:['ไม่ใช่งานซ่อม', 'บันทึกความรู้/คู่มือถูกกรอกปนมาในตารางแจ้งซ่อม ทำให้ Pareto เพี้ยน'],
     UNKNOWN_MACHINE:['เครื่องไม่อยู่ในทะเบียน', 'จับคู่กับข้อมูลเครื่องไม่ได้'],
-    LATE_CLOSE:   ['ปิดงานช้า เกินเพดาน', 'ใบงานเปิดค้างเกิน 3 วันทำการ — นับให้ 27 ชม. ตามเพดาน ส่วนที่เหลือคือปัญหาการปิดงาน ไม่ใช่เครื่องเสีย'],
+    LATE_CLOSE:   ['ปิดงานช้า เกินเพดาน', 'ใบงานเปิดค้างเกิน 3 วันทำการ — นับให้ 24 ชม. ตามเพดาน ส่วนที่เหลือคือปัญหาการปิดงาน ไม่ใช่เครื่องเสีย'],
     DUR_MISMATCH: ['คอลัมน์ downtime ไม่ตรงกับเวลาจริง', 'ค่าที่ระบบต้นทางคำนวณมาไม่ตรงกับเวลาเริ่ม–ปิดงานในใบเดียวกัน — ระบบยึดเวลาเริ่ม–ปิดงาน'],
   };
   return `
-  <div class="ph reveal">
-    <div class="k">❤️ Data Quality</div>
-    <h1>เชื่อข้อมูลชุดนี้ได้แค่ไหน?</h1>
-    <p>ตัวเลขทุกอันในหน้าอื่นดีได้เท่าที่ข้อมูลดี — หน้านี้บอกตรง ๆ ว่าอะไรยังขาด และขาดแล้วกระทบอะไร</p>
-  </div>
+  ${pageHead({
+    k: '❤️ Data Quality',
+    h1: 'เชื่อข้อมูลชุดนี้ได้แค่ไหน?',
+    facts: [
+      {ic:'📋', v: n0(o.n), l:'ใบงานที่ตรวจ'},
+      {ic:'⏱', v: n0(o.withHours), l:'ใบที่มีชั่วโมง', tone:'good'},
+      {ic:'❓', v: n0(o.noHours), l:'ใบที่ไม่มีชั่วโมง', tone: o.noHours ? 'warn' : 'good'},
+    ],
+  })}
 
   ${rosterQuality(c)}
 
@@ -4978,12 +5395,27 @@ P.quality = c => {
       `<div class="bd" style="display:flex;gap:24px;align-items:center;flex-wrap:wrap;justify-content:center">
         ${ringGauge(score, 'จาก 100', '', scoreCol, 168)}
         <div style="flex:1;min-width:230px">
-          <p style="font-size:13.5px;color:var(--ink2);line-height:1.8">
-            คิดจากสัดส่วนข้อมูลที่ขาด โดยถ่วงน้ำหนักตามผลกระทบ:<br>
-            • ไม่มีชั่วโมง = หนักที่สุด (หายจากทุกข้อสรุปที่เป็นชั่วโมง)<br>
-            • ไม่ระบุชุดอุปกรณ์ = หนักรองลงมา (จัดกลุ่มไม่ได้)<br>
-            • ระบบเดาหมวดให้ = เบาที่สุด (เดาถูกเป็นส่วนใหญ่ และติดป้ายไว้เสมอ)</p>
-          <div style="margin-top:13px">
+          <p class="eyebrow" style="margin-bottom:8px">อะไรหักคะแนนมากที่สุด</p>
+          ${(() => {
+            /* The three weights used to be three bullet points. As three bars
+               they say the same thing in the order they are weighted, and the
+               reader can see at once which gap is doing the damage. */
+            const W = [
+              {l:'ไม่มีชั่วโมง', w:100, c:'var(--crit)', d:'หายจากทุกข้อสรุปที่เป็นชั่วโมง'},
+              {l:'ไม่ระบุชุดอุปกรณ์', w:60, c:'var(--orange)', d:'จัดกลุ่มไม่ได้'},
+              {l:'ระบบเดาหมวดให้', w:22, c:'var(--warn)', d:'เดาถูกเป็นส่วนใหญ่ และติดป้ายไว้เสมอ'},
+            ];
+            return W.map(x => `<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;
+              gap:9px;align-items:center;margin-bottom:7px" title="${esc(x.d)}">
+              <span style="min-width:0">
+                <span style="font-size:12.5px;display:block">${x.l}</span>
+                <span class="track" style="height:7px;margin-top:3px">
+                  <i data-pct="${x.w}" style="background:${x.c}"></i></span></span>
+              <span style="font-size:var(--t-2xs);color:var(--muted);white-space:nowrap">${
+                x.w >= 100 ? 'หนักสุด' : x.w >= 60 ? 'รองลงมา' : 'เบาสุด'}</span>
+            </div>`).join('');
+          })()}
+          <div style="margin-top:13px;border-top:1px solid var(--line);padding-top:11px">
             <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--muted)">
               <span>งานที่คำนวณ Downtime ได้</span><b class="tab" style="color:var(--ink)">${pc(o.coverage, 0)}</b></div>
             <div class="track" style="height:9px;margin-top:6px">
@@ -4991,6 +5423,15 @@ P.quality = c => {
             <p style="font-size:12.5px;color:var(--muted);margin-top:6px">
               ${n0(o.withHours)} จาก ${n0(o.n)} ใบงานในมุมมองนี้</p>
           </div>
+          ${why('คะแนนนี้คิดยังไง',
+            `คิดจาก<b>สัดส่วนข้อมูลที่ขาด</b> โดยถ่วงน้ำหนักตามผลกระทบ —
+             ช่องที่ขาดแล้วทำให้ข้อสรุปพังมากกว่า จะหักคะแนนหนักกว่า
+             <ul style="margin:6px 0 0;padding-left:17px">
+               <li><b>ไม่มีชั่วโมง</b> = หนักที่สุด — ใบนั้นหายจากทุกข้อสรุปที่เป็นชั่วโมง
+                 ไม่ได้ถูกนับเป็นศูนย์</li>
+               <li><b>ไม่ระบุชุดอุปกรณ์</b> = หนักรองลงมา — จัดกลุ่มไม่ได้ Pareto จึงชี้เป้าไม่แม่น</li>
+               <li><b>ระบบเดาหมวดให้</b> = เบาที่สุด — เดาถูกเป็นส่วนใหญ่ และติดป้ายกำกับไว้เสมอ</li>
+             </ul>`)}
         </div>
       </div>`)}
     ${bare('ปัญหาที่พบ',
@@ -5022,37 +5463,78 @@ P.quality = c => {
           <span style="font-size:12px;color:var(--muted)">${n0(m.count)} ใบงาน</span>
         </div>`).join('') || '<p class="empty"><b>ยังไม่มีข้อมูล</b></p>'}
       </div>
-      <p style="font-size:12.5px;color:var(--muted);margin-top:11px">
-        เดือนที่ต่ำกว่า 80% จะถูกทำเครื่องหมายบนกราฟแนวโน้ม และ<b>ไม่ถูกนำไปเทียบเป้า</b>
-        เพราะค่าที่ต่ำมาจากข้อมูลขาด ไม่ใช่ผลงานดีขึ้น</p>
+      <div style="margin-top:11px">${legendRow([
+        {c:'var(--good)', l:'ครบ 80% ขึ้นไป — ใช้เทียบเป้าได้'},
+        {c:'var(--warn)', l:'50–80%'},
+        {c:'var(--crit)', l:'ต่ำกว่า 50% — ไม่นำไปเทียบเป้า'},
+      ])}</div>
+      ${why('ทำไมเดือนที่ข้อมูลไม่ครบถึงไม่ถูกนำไปเทียบเป้า',
+        `เดือนที่ต่ำกว่า 80% จะถูกทำเครื่องหมายบนกราฟแนวโน้ม และ<b>ไม่ถูกนำไปเทียบเป้า</b>
+         เพราะค่าที่ต่ำมาจาก<b>ข้อมูลขาด</b> ไม่ใช่ผลงานดีขึ้น —
+         ใบที่ไม่มีชั่วโมงจะหายจากยอดรวม ไม่ได้ถูกนับเป็นศูนย์ เดือนนั้นจึงดูดีกว่าความจริงเสมอ`)}
     </div>`)}
 
   <section class="card" style="margin-top:14px">
-    <div class="hd"><div><h3>ไฟล์ที่โหลด &amp; คอลัมน์ที่ใช้ไม่ได้</h3>
-      <p>คอลัมน์ที่ระบบจับคู่ไม่ได้จะไม่ถูกนำมาคำนวณเลย · คอลัมน์ของช่างอ่านได้จากหัวคอลัมน์ชื่อ
-        <b>อาการ</b> / <b>สาเหตุ</b> / <b>วิธีแก้ไข</b> (หรือ อาการเสีย, สาเหตุที่เสีย, การแก้ไขของช่าง)</p></div></div>
-    <div class="bd">
-      ${S.sources.filter(s => s.kind !== ROSTER_KIND)
-        .map(s => `<p style="font-size:13px;color:var(--muted);line-height:1.8;margin-bottom:9px">
-        <b style="color:var(--ink)">${esc(s.name)}</b> — ${n0(s.rows)} แถว<br>
-        ${s.missing.length ? `<span style="color:var(--crit-ink)">ไม่พบคอลัมน์สำคัญ: ${esc(s.missing.join(', '))}</span><br>` : ''}
-        🔧 คอลัมน์ของช่าง: ${['อาการ', 'สาเหตุ', 'วิธีแก้ไข'].map((l, i) => (s.techCols || [])[i]
-          ? `<b style="color:var(--good-ink)">✓ ${l}</b> <span style="font-size:12px">(“${esc((s.techCols || [])[i])}”)</span>`
-          : `<span>✗ ${l}</span>`).join(' · ')}<br>
-        ${s.unmapped.length ? `ไม่ได้ใช้ ${s.unmapped.length} คอลัมน์: ${esc(s.unmapped.slice(0, 12).join(', '))}${s.unmapped.length > 12 ? ' …' : ''}`
-          : 'ใช้ครบทุกคอลัมน์ที่รู้จัก'}</p>`).join('')}
+    <div class="hd"><div><h3>ไฟล์ที่โหลด &amp; คอลัมน์ที่ใช้ไม่ได้</h3></div>
+      <div>${why('ระบบอ่านคอลัมน์ไหนบ้าง',
+        `คอลัมน์ที่ระบบจับคู่ไม่ได้<b>จะไม่ถูกนำมาคำนวณเลย</b> ไม่ได้ถูกเดาค่าให้
+         <br>คอลัมน์ของช่างอ่านได้จากหัวคอลัมน์ชื่อ <b>อาการ</b> / <b>สาเหตุ</b> / <b>วิธีแก้ไข</b>
+         (หรือ อาการเสีย, สาเหตุที่เสีย, การแก้ไขของช่าง)`)}</div></div>
+    <div class="bd" style="display:flex;flex-direction:column;gap:11px">
+      ${S.sources.filter(s => s.kind !== ROSTER_KIND).map(s => {
+        const tech = ['อาการ', 'สาเหตุ', 'วิธีแก้ไข'];
+        const got = tech.filter((l, i) => (s.techCols || [])[i]).length;
+        return `<div style="border-left:3px solid var(--${s.missing.length ? 'crit' : got === 3 ? 'good' : 'warn'});
+          padding-left:11px">
+          <div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap">
+            <b style="font-size:13.5px">${esc(s.name)}</b>
+            <span class="chip">${n0(s.rows)} แถว</span>
+            ${s.missing.length ? `<span class="chip crit">⚠ ขาดคอลัมน์สำคัญ ${n0(s.missing.length)}</span>` : ''}
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px">
+            ${tech.map((l, i) => (s.techCols || [])[i]
+              ? `<span class="chip good" title="อ่านจากคอลัมน์ “${esc((s.techCols || [])[i])}”">✓ ${l}</span>`
+              : `<span class="chip">✗ ${l}</span>`).join('')}
+          </div>
+          ${(() => {
+            /* How much of the sheet the app actually reads. The header row is
+               the only honest denominator, so it comes from the grid itself —
+               columns the mapper could not place are the remainder. */
+            const headLen = (s.grid && s.grid[0] ? s.grid[0].filter(h => h && String(h).trim()).length : 0);
+            const used = Math.max(0, headLen - s.unmapped.length);
+            return headLen ? `<div style="margin-top:8px;max-width:420px">${stackBar([
+              {v: used, l:'คอลัมน์ที่ใช้', c:'var(--good)'},
+              {v: s.unmapped.length, l:'ไม่ได้ใช้', c:'var(--line2)'},
+            ].filter(x => x.v > 0))}</div>` : '';
+          })()}
+          ${s.unmapped.length ? why('คอลัมน์ที่ไม่ได้ใช้ ' + n0(s.unmapped.length) + ' ช่อง',
+            esc(s.unmapped.join(' · '))) : ''}
+          ${s.missing.length ? `<p style="font-size:12.5px;color:var(--crit-ink);margin-top:5px">
+            ไม่พบคอลัมน์สำคัญ: ${esc(s.missing.join(', '))}</p>` : ''}
+        </div>`;
+      }).join('')}
     </div>
   </section>
 
   ${bare('สิ่งที่ควรแก้ที่ฟอร์มแจ้งซ่อม',
-    `<div class="bd"><ol style="font-size:13.5px;line-height:2;padding-left:20px;color:var(--ink2)">
-      <li><b>บังคับเลือกชุดอุปกรณ์</b> — ตอนนี้ว่างเยอะ ทำให้ Pareto ชี้เป้าผิด</li>
-      <li><b>ตรวจเวลาเริ่ม/เวลาเสร็จ</b> ไม่ให้เวลาเสร็จมาก่อนเวลาเริ่ม (ต้นเหตุของค่าติดลบ)</li>
-      <li><b>แยก “เวลาที่เครื่องหยุดจริง” ออกจาก “เวลาที่ปิดใบงาน”</b> — ตอนนี้งานที่เครื่องไม่หยุดก็ถูกนับเวลารวมด้วย</li>
-      <li><b>เพิ่มช่อง “สาเหตุจริง (Root Cause)” และ “การแก้ถาวร”</b> เพื่อให้ไล่ถึงต้นตอได้</li>
-      <li><b>ใช้รหัสสาขาให้ตรงกัน</b> — พบชื่อสะกดต่างกันแต่เป็นสาขาเดียวกัน (ระบบรวมให้ด้วยรหัสแล้ว)</li>
-      <li><b>อย่ากรอกบันทึกความรู้/คู่มือปนในตารางแจ้งซ่อม</b> — ทำให้ยอดชั่วโมงเพี้ยน</li>
-    </ol></div>`)}`;
+    `<div class="bd"><div class="grid g3">
+      ${[
+        ['🧩', 'บังคับเลือกชุดอุปกรณ์', 'ตอนนี้ว่างเยอะ ทำให้ Pareto ชี้เป้าผิด'],
+        ['⏱', 'ตรวจเวลาเริ่ม / เวลาเสร็จ', 'ไม่ให้เวลาเสร็จมาก่อนเวลาเริ่ม — ต้นเหตุของค่าติดลบ'],
+        ['⛔', 'แยกเวลาเครื่องหยุด ออกจากเวลาปิดใบงาน', 'ตอนนี้งานที่เครื่องไม่หยุดก็ถูกนับเวลารวมด้วย'],
+        ['🧠', 'เพิ่มช่องสาเหตุจริง และการแก้ถาวร', 'เพื่อให้ไล่ถึงต้นตอได้ ไม่ใช่แค่บันทึกว่าซ่อมแล้ว'],
+        ['📍', 'ใช้รหัสสาขาให้ตรงกัน', 'พบชื่อสะกดต่างกันแต่เป็นสาขาเดียวกัน — ระบบรวมให้ด้วยรหัสแล้ว'],
+        ['📒', 'อย่ากรอกคู่มือ/บันทึกความรู้ปนในตารางแจ้งซ่อม', 'ทำให้ยอดชั่วโมงเพี้ยน'],
+      ].map(([ic, t, d], i) => `<div style="background:var(--surface2);border:1px solid var(--line);
+        border-radius:12px;padding:12px 13px">
+        <div style="display:flex;gap:8px;align-items:center">
+          <span style="font-size:16px">${ic}</span>
+          <span class="tab" style="font-size:var(--t-2xs);color:var(--muted);font-weight:700">${i + 1}</span>
+        </div>
+        <b style="font-size:13px;display:block;margin-top:6px;line-height:1.5">${t}</b>
+        <p style="font-size:var(--t-2xs);color:var(--muted);margin-top:4px;line-height:1.65">${d}</p>
+      </div>`).join('')}
+    </div></div>`)}`;
 };
 
 /* ---------- 📑 EXECUTIVE REPORT ---------- */
@@ -5072,13 +5554,18 @@ P.exec = c => {
       ` ซึ่งรวมกันคิดเป็น <b>${pc(sum(top3, t => t.share), 0)}</b> ของเวลาที่เครื่องหยุดทั้งหมด` : '') +
     (rs.pairs ? ` และ <b>${pc(rs.hoursShare, 0)}</b> ของ Downtime มาจากปัญหาที่<b>เคยซ่อมไปแล้วแต่กลับมาซ้ำ</b>` : '') + '.';
   return `
-  <div class="ph reveal">
-    <div class="k">📑 Executive Report</div>
-    <h1>สรุปสำหรับผู้บริหาร</h1>
-    <p>ช่วงข้อมูล ${esc(monthLabel(o.first))} – ${esc(monthLabel(o.last))} ·
-       ${n0(o.n)} ใบงาน · ${o.branches} สาขา ·
-       ${S.f.stoppedOnly ? 'นับเฉพาะงานที่เครื่องหยุดจริง' : 'นับทุกใบงาน'}</p>
-  </div>
+  ${pageHead({
+    k: '📑 Executive Report',
+    h1: 'สรุปสำหรับผู้บริหาร',
+    facts: [
+      {ic:'🗓', v: esc(monthLabel(o.first)) + ' – ' + esc(monthLabel(o.last)), l:'ช่วงข้อมูล'},
+      {ic:'📋', v: n0(o.n), l:'ใบงาน'},
+      {ic:'📍', v: n0(o.branches), l:'สาขา'},
+      S.f.stoppedOnly
+        ? {ic:'⛔', v:'เฉพาะเครื่องหยุด', l:'ตัวกรอง', tone:'info'}
+        : {ic:'⚠️', v:'ทุกใบงาน', l:'รวมงานที่เครื่องไม่หยุด', tone:'warn'},
+    ],
+  })}
 
   ${editBanner(c)}
 
@@ -5228,9 +5715,9 @@ function editRows(){
   /* The top filter bar used to be ignored here, on the grounds that a broken
      row must be findable whatever the bar says. The user asked for the
      opposite — look at QW in September and edit exactly that — so the bar is
-     obeyed by default and `S.followFilter` turns it off in one click. */
+     obeyed by default and `S.edFollow` turns it off in one click. */
   const every = S.raw.map(applyEdits);
-  const all = S.followFilter ? applyFilters(every, S.f) : every;
+  const all = S.edFollow ? applyFilters(every, S.f) : every;
   const pick = editFilterFn(S.editFilter);
   const q = S.editQuery.trim().toLowerCase();
   const rows = all.filter(r => {
@@ -5266,23 +5753,26 @@ P.dataedit = c => {
   };
 
   return `
-  <div class="ph reveal">
-    <div class="k">🗂 Data Editor</div>
-    <h1>ข้อมูลไหนเอามาคิด ข้อมูลไหนไม่เอา</h1>
-    <p>ไฟล์ต้นฉบับ<b>ไม่ถูกแก้</b> ทุกอย่างที่แก้ตรงนี้เก็บทับไว้ในเบราว์เซอร์เครื่องนี้เท่านั้น
-       กด “คืนค่าเดิมทั้งหมด” เมื่อไรก็กลับไปตรงกับไฟล์ทันที
-       ทุกกราฟและ KPI ทุกหน้าจะคำนวณใหม่ทันทีที่แก้ และจะมีแถบเตือนกำกับไว้ว่าตัวเลขไม่ใช่ค่าดิบจากไฟล์แล้ว<br>
-       ${S.followFilter
-         ? `<b style="color:var(--good-ink)">กำลังเดินตามตัวกรองด้านบน</b> —
-            แก้เฉพาะชุดที่กรองไว้ได้เลย${every.length > all.length
-              ? ` · <b>ตัวกรองซ่อนอยู่ ${n0(every.length - all.length)} แถว</b>` : ''}
-            · กดปุ่มด้านล่างเพื่อดูทุกแถวในไฟล์`
-         : `<b style="color:var(--warn-ink)">กำลังแสดงทุกแถวในไฟล์ ไม่สนตัวกรองด้านบน</b> —
-            เหมาะกับตอนไล่หาแถวที่ผิด · กดปุ่มด้านล่างเพื่อกลับไปตามตัวกรอง`}</p>
-  </div>
+  ${pageHead({
+    k: '🗂 Data Editor',
+    h1: 'ข้อมูลไหนเอามาคิด ข้อมูลไหนไม่เอา',
+    facts: [
+      {ic:'🔒', v:'ไฟล์ต้นฉบับไม่ถูกแก้', l:'ทุกอย่างเก็บทับในเครื่องนี้', tone:'good'},
+      S.edFollow
+        ? {ic:'🔗', v:'เดินตามตัวกรองด้านบน', l: every.length > all.length
+            ? 'ตัวกรองซ่อนอยู่ ' + n0(every.length - all.length) + ' แถว' : 'เห็นครบทุกแถว', tone:'good'}
+        : {ic:'🗃', v:'ทุกแถวในไฟล์', l:'ไม่สนตัวกรองด้านบน', tone:'warn'},
+      {ic:'♻️', v:'ทุกหน้าคิดใหม่ทันที', l:'เมื่อแก้หรือตัดออก', tone:'info'},
+    ],
+  })}
+  <div class="reveal" style="margin:-6px 0 14px">${why('แก้ตรงนี้แล้วกระทบอะไร และย้อนกลับยังไง',
+    `การแก้และการตัดออกถูกนำไปใช้<b>ก่อน</b>ตัวกรองทุกตัว ทุกกราฟ ทุก KPI และไฟล์ PDF
+     จึงคำนวณใหม่ทันที และทุกหน้าจะมีแถบกำกับไว้ว่าตัวเลขไม่ใช่ค่าดิบจากไฟล์แล้ว
+     <br><b>ไฟล์ต้นฉบับไม่เคยถูกแตะ</b> ทุกอย่างเก็บทับไว้ในเบราว์เซอร์เครื่องนี้เท่านั้น —
+     กด “คืนค่าเดิมทั้งหมด” เมื่อไรก็กลับไปตรงกับไฟล์ทันที`)}</div>
 
   <div class="grid g4" style="margin-bottom:14px">
-    ${kpiCard({label: S.followFilter ? 'รายการในชุดที่กรองไว้' : 'รายการทั้งหมดในไฟล์', raw: all.length, unit:'รายการ',
+    ${kpiCard({label: S.edFollow ? 'รายการในชุดที่กรองไว้' : 'รายการทั้งหมดในไฟล์', raw: all.length, unit:'รายการ',
       sub: S.sources.length + ' ไฟล์', tone:'info', d:1})}
     ${kpiCard({label:'นำมาคิด', raw: kept, unit:'รายการ',
       sub: pc(all.length ? kept / all.length * 100 : 0, 0) + ' ของทั้งหมด', tone:'good', d:2,
@@ -5306,9 +5796,15 @@ P.dataedit = c => {
     </div>
     <div class="bd" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--line)">
       <span style="font-size:12.5px;color:var(--muted)">ทำกับ ${n0(rows.length)} รายการที่กรองอยู่ตอนนี้:</span>
-      <button class="btn sm${S.followFilter ? ' on' : ''}" id="edFollow"
-        title="สลับระหว่าง ตามตัวกรองด้านบน กับ ทุกแถวในไฟล์"
-        >${S.followFilter ? '🔗 ตามตัวกรองด้านบน' : '🗂 ทุกแถวในไฟล์'}</button>
+      ${/* The chip is the state; the button is what pressing it does. They used
+            to be the same element, so the button read "ตามตัวกรองด้านบน" while
+            following — and pressing it did the opposite of what it said. */''}
+      <span class="chip ${S.edFollow ? 'good' : 'crit'}" title="โหมดของตารางตอนนี้">${
+        S.edFollow ? '🔗 กำลังตามตัวกรองด้านบน' : '🗂 กำลังแสดงทุกแถวในไฟล์'}</span>
+      <button class="btn sm" id="edFollow"
+        title="${S.edFollow ? 'เลิกสนใจตัวกรองด้านบน แล้วไล่ดูทุกแถวในไฟล์'
+                            : 'กลับไปแสดงเฉพาะชุดที่ตัวกรองด้านบนเลือกไว้'}"
+        >${S.edFollow ? '🗂 ดูทุกแถวในไฟล์แทน' : '🔗 กลับไปตามตัวกรองด้านบน'}</button>
       <button class="btn sm${S.editHideExcluded ? ' on' : ''}" id="edHideEx"
         title="ซ่อนรายการที่ตัดออกแล้วจากตาราง (ข้อมูลยังอยู่ กดคืนค่าได้)"
         >${S.editHideExcluded ? '👁 กำลังซ่อนที่ตัดออก' : '🙈 ซ่อนที่ตัดออกแล้ว'}</button>
@@ -5895,13 +6391,20 @@ P.action = c => {
   };
 
   return `
-  <div class="ph reveal">
-    <div class="k">🛠 Action Plan</div>
-    <h1>FROM DATA → ACTION</h1>
-    <p>แต่ละงานผูกกับ<b>เคสจริงในข้อมูล</b> — กดขยายเพื่อดูใบงานที่อยู่เบื้องหลัง อาการที่เจอบ่อย
-       สาขาที่เกิด และแนวโน้มล่าสุด แล้วกรอกสาเหตุ วิธีแก้ และชั่วโมงที่วัดได้จริง
-       <span style="color:var(--muted)">(บันทึกในเบราว์เซอร์เครื่องนี้)</span></p>
-  </div>
+  ${pageHead({
+    k: '🛠 Action Plan',
+    h1: 'FROM DATA → ACTION',
+    facts: [
+      {ic:'🔗', v: n0(acts.length), l:'งานที่ผูกกับเคสจริง'},
+      {ic:'✅', v: n0(measured), l:'วัดผลจากข้อมูลแล้ว', tone:'good'},
+      {ic:'🎯', v: hr(c.need), l:'เป้าที่ต้องลด', tone:'crit'},
+      {ic:'💾', v:'เก็บในเครื่องนี้', l:'ไม่ขึ้นเว็บจนกว่าจะส่ง'},
+    ],
+  })}
+  <div class="reveal" style="margin:-6px 0 14px">${why('แต่ละแถวกดดูอะไรได้บ้าง',
+    `กดขยายแถวงานเพื่อดู<b>ใบงานที่อยู่เบื้องหลัง</b> อาการที่เจอบ่อย สาขาที่เกิด และแนวโน้มล่าสุด
+     แล้วกรอกสาเหตุ วิธีแก้ และชั่วโมงที่วัดได้จริงลงไปในแถวเดียวกัน
+     ตัวเลข “ลดได้จริง” จะคำนวณจากใบงานก่อน/หลังวันที่เริ่มงานนั้นให้เอง ไม่ต้องกรอกเอง`)}</div>
 
   <div class="grid g5" style="margin-bottom:14px">
     ${ACT_STATUS.map((s, i) => kpiCard({label: s[1], raw: byStatus(s[0]).length, unit:'งาน',
@@ -6609,15 +7112,33 @@ function techNotesHTML(tn, top, stacked){
   return `<div class="grid ${stacked ? '' : 'g3'}" style="gap:12px${stacked ? ';grid-template-columns:1fr' : ''}">${TECH_FIELDS.map(([f, label, color]) => {
     const x = tn[f];
     return `<div>
+      ${/* A percentage of three tickets reads like a finding and is not one.
+            Below five, say the two counts in words and let the reader judge. */''}
       <p style="font-size:12px;color:var(--muted);margin-bottom:5px">${label}
-        <span class="tab" style="color:${x.share < 50 ? 'var(--warn-ink)' : 'var(--muted)'}">· กรอก ${n0(x.filled)}/${n0(tn.n)} ใบ (${pc(x.share, 0)})</span></p>
-      ${x.list.slice(0, top || 5).map(s => `
-        <div style="display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:8px;align-items:center;padding:3px 0">
-          <span style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.key)}">${esc(s.key)}</span>
-          <span style="display:flex;align-items:center;gap:6px">
-            <span class="track" style="height:7px;flex:1"><i data-pct="${s.share}" style="background:${color}"></i></span>
-            <b class="tab" style="font-size:12px;white-space:nowrap">${n0(s.count)}× ${n0(s.hours)}h</b></span>
-        </div>`).join('') || '<p style="font-size:12.5px;color:var(--muted)">— ยังไม่มีใครกรอก —</p>'}
+        <span class="tab" style="color:${x.share < 50 ? 'var(--warn-ink)' : 'var(--muted)'}">· ${
+          !x.filled ? 'ยังไม่มีใครกรอก (จาก ' + n0(tn.n) + ' ใบ)'
+          : x.filled === tn.n ? 'กรอกครบทั้ง ' + n0(tn.n) + ' ใบ'
+          : tn.n < 5 ? 'กรอก ' + n0(x.filled) + ' จาก ' + n0(tn.n) + ' ใบ'
+          : 'กรอก ' + n0(x.filled) + '/' + n0(tn.n) + ' ใบ (' + pc(x.share, 0) + ')'}</span></p>
+      ${/* "1× 27h" is two abbreviations and a unit nobody outside the team
+            reads. Say the count only when there is more than one, and say the
+            hours in Thai. The empty case is already stated in the label above,
+            so it is not repeated here. */''}
+      ${(() => {
+        const rows = x.list.slice(0, top || 5);
+        /* One entry fills the bar to 100% of itself and compares nothing, so
+           the bar is dropped and the row closes up. */
+        const solo = rows.length < 2;
+        return rows.map(s => `
+          <div style="display:grid;grid-template-columns:${
+            solo ? 'minmax(0,1fr) 96px' : 'minmax(0,1fr) minmax(60px,0.7fr) 96px'};
+            gap:8px;align-items:center;padding:3px 0">
+            <span style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.key)}">${esc(s.key)}</span>
+            ${solo ? '' : `<span class="track" style="height:7px"><i data-pct="${s.share}" style="background:${color}"></i></span>`}
+            <b class="tab" style="font-size:12px;white-space:nowrap;text-align:right">${
+              s.count > 1 ? n0(s.count) + ' ครั้ง · ' : ''}${n1(s.hours)} ชม.</b>
+          </div>`).join('');
+      })()}
     </div>`;
   }).join('')}</div>`;
 }
@@ -6909,19 +7430,27 @@ P.rootcause = c => {
   const opt = (v, l, cur) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(l)}</option>`;
 
   return `
-  <div class="ph reveal">
-    <div class="k">🧠 Root Cause Analysis</div>
-    <h1>ทำไมมันถึงเสีย และต้องแก้ถึงขั้นไหน</h1>
-    <p>เลือก<b>ปัญหาหลัก</b>ที่กำลังจะแก้ แล้วทั้งหน้านี้จะคำนวณตามปัญหานั้น —
-       ไฟล์แจ้งซ่อมไม่มีช่อง “สาเหตุ” หน้านี้จึงไม่เดาสาเหตุให้ แต่อ่านรูปแบบการเสียจากข้อมูลจริง
-       แล้วบอกว่าควรสงสัยอะไร ควรทำถึงขั้นไหน และคุ้มจะไปถึง S4 หรือยัง</p>
-  </div>
+  ${pageHead({
+    k: '🧠 Root Cause Analysis',
+    h1: 'ทำไมมันถึงเสีย และต้องแก้ถึงขั้นไหน',
+    facts: [
+      {ic:'①', v:'เลือกปัญหา', l:'ทั้งหน้าคิดตามที่เลือก', tone:'info'},
+      {ic:'②', v:'ดูขั้นที่ควรทำ', l:'S1 → S4'},
+      {ic:'🚫', v:'ไม่เดาสาเหตุให้', l:'ไฟล์ไม่มีช่องสาเหตุ', tone:'warn'},
+    ],
+  })}
+  <div class="reveal" style="margin:-6px 0 14px">${why('หน้านี้รู้สาเหตุได้ยังไง ทั้งที่ไฟล์ไม่มีช่องสาเหตุ',
+    `ไฟล์แจ้งซ่อม<b>ไม่มีช่อง “สาเหตุ”</b> หน้านี้จึง<b>ไม่เดาสาเหตุให้</b> สิ่งที่ทำคืออ่าน
+     <b>รูปแบบการเสีย</b>จากข้อมูลจริง — เสียกี่ครั้ง ที่กี่สาขา ห่างกันกี่วัน อาการซ้ำกันไหม —
+     แล้วบอกว่าควร<b>สงสัย</b>อะไร ควรทำถึงขั้นไหน และคุ้มจะลงทุนไปถึง S4 หรือยัง
+     ส่วนสาเหตุจริงต้องให้ช่างเป็นคนกรอก และเมื่อกรอกแล้ว ข้อสรุปของหน้านี้จะยึดสิ่งที่กรอกก่อนเสมอ`)}</div>
 
   <section class="card reveal" style="margin-bottom:14px;border-color:color-mix(in srgb,var(--brand) 55%,transparent)">
     <div class="hd">
-      <div><h3>① ปัญหาหลักที่กำลังแก้</h3>
-        <p>ทุกตัวเลข ทุกกราฟ และทุกข้อแนะนำในหน้านี้ล้อตามที่เลือกตรงนี้</p></div>
-      ${rank ? `<span class="chip info">อันดับ ${n0(rank)} จาก ${n0(byHours.length)} ระบบ</span>` : ''}
+      <div><h3>① ปัญหาหลักที่กำลังแก้</h3></div>
+      <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+        <span class="chip">⤵ ทั้งหน้าคิดตามที่เลือกตรงนี้</span>
+        ${rank ? `<span class="chip info">อันดับ ${n0(rank)} จาก ${n0(byHours.length)} ระบบ</span>` : ''}</div>
     </div>
     <div class="bd">
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
@@ -6984,19 +7513,20 @@ P.rootcause = c => {
   ${stageSection(a, c, note, gates, now, next, label)}
 
   <section class="card" style="margin-bottom:14px">
-    <div class="hd"><div><h3>③ ข้อมูลบอกอะไร — สัญญาณที่อ่านได้จากรูปแบบการเสีย</h3>
-      <p>แต่ละข้อมาจากตัวเลขจริงของ “${esc(clip(label, 44))}” ไม่ใช่ข้อสันนิษฐานลอย ๆ</p></div></div>
+    <div class="hd"><div><h3>③ ข้อมูลบอกอะไร — สัญญาณที่อ่านได้จากรูปแบบการเสีย</h3></div>
+      <div><span class="chip">📊 ${n0(a.signals.length)} สัญญาณจากตัวเลขจริง</span></div></div>
     <div class="bd">
       ${a.signals.length ? `<div class="grid g2" style="gap:10px">
         ${a.signals.map((s, i) => `
           <div class="card reveal" data-d="${(i%4)+1}" style="padding:12px 14px;
+            border-left:3px solid var(--${s.tone});
             border-color:color-mix(in srgb,var(--${s.tone}) 40%,transparent)">
             <div style="display:flex;align-items:center;gap:7px;margin-bottom:5px">
               <span class="chip ${s.tone}">${esc(s.m)}</span>
               <b style="font-size:13.5px">${esc(s.name)}</b>
             </div>
-            <p style="font-size:12.5px;color:var(--muted);margin-bottom:5px">📊 ${s.why(a)}</p>
-            <p style="font-size:13px;color:var(--ink2);line-height:1.7">${esc(s.means)}</p>
+            <p style="font-size:12.5px;color:var(--muted)">📊 ${s.why(a)}</p>
+            ${why('แปลว่าอะไร · ควรสงสัยอะไร', esc(s.means))}
           </div>`).join('')}
       </div>`
       : `<p style="font-size:13.5px;color:var(--muted)">
@@ -7245,16 +7775,22 @@ P.weekly = c => {
   };
 
   return `
-  <div class="ph reveal">
-    <div class="k">📅 รายสัปดาห์</div>
-    <h1>สัปดาห์นี้ดีขึ้นหรือยัง?</h1>
-    <p>${filtered
-      ? `กำลังดูเฉพาะ<b>${esc(rangeLabel)}</b> ตามตัวกรองด้านบน — ${n0(ws.length)} สัปดาห์ที่คาบเกี่ยวช่วงนี้
-         (สัปดาห์ก่อนหน้าถูกคำนวณไว้เพื่อใช้เทียบ แต่ไม่แสดง)`
-      : 'สัปดาห์ = จันทร์–อาทิตย์ · เลือกเดือนที่ตัวกรองด้านบนเพื่อดูเฉพาะสัปดาห์ของเดือนนั้น'} ·
-       สัปดาห์ที่ยังไม่จบจะเทียบกับ<b>ช่วงวันเดียวกัน</b>ของสัปดาห์ก่อน
-       ไม่เอาครึ่งสัปดาห์ไปเทียบทั้งสัปดาห์ · เป้าต่อสัปดาห์แปลงมาจากเป้ารายเดือนที่ตั้งไว้</p>
-  </div>
+  ${pageHead({
+    k: '📅 รายสัปดาห์',
+    h1: 'สัปดาห์นี้ดีขึ้นหรือยัง?',
+    facts: [
+      {ic:'🗓', v:'จันทร์–อาทิตย์', l:'1 สัปดาห์'},
+      {ic:'📊', v: n0(ws.length), l: filtered ? 'สัปดาห์ในช่วงที่กรอง' : 'สัปดาห์ที่มีข้อมูล'},
+      filtered ? {ic:'🔍', v: esc(rangeLabel), l:'ตามตัวกรองด้านบน', tone:'info'} : null,
+      {ic:'⚖️', v:'เทียบวันต่อวัน', l:'สัปดาห์ที่ยังไม่จบ', tone:'info'},
+    ],
+  })}
+  <div class="reveal" style="margin:-6px 0 14px">${why('สัปดาห์ที่ยังไม่จบ เทียบยังไง',
+    `สัปดาห์ที่ยังไม่ครบ 7 วันจะถูกตัดให้เหลือเฉพาะวันที่มีข้อมูล แล้วเทียบกับ
+     <b>ช่วงวันเดียวกัน</b>ของสัปดาห์ก่อน — ไม่เอาครึ่งสัปดาห์ไปเทียบกับทั้งสัปดาห์
+     เพราะครึ่งสัปดาห์จะดูเหมือนดีขึ้นเสมอ
+     ${filtered ? '<br>ตอนนี้กรองอยู่ที่ <b>' + esc(rangeLabel) + '</b> สัปดาห์ก่อนหน้าช่วงนี้ยังถูกคำนวณไว้เพื่อใช้เทียบ แต่ไม่แสดงบนกราฟ' : ''}
+     <br>เป้าต่อสัปดาห์แปลงมาจากเป้ารายเดือนที่ตั้งไว้ โดยหารตามจำนวนวัน`)}</div>
 
   ${editBanner(c)}
 
@@ -7330,7 +7866,7 @@ P.weekly = c => {
    QW is open 12 h a day, WAG runs 24, and both are held to 97.92%. The
    downtime that belongs here is the downtime that happened while the shop was
    OPEN — which is not the same number the team's own work is measured with
-   (that one counts only the 09:00–18:00 a technician can work), so the two
+   (that one counts only the 09:00–17:00 a technician can work), so the two
    live side by side and this page says which is which.
    A branch with no tickets in a month was up for all of it: it is in the
    denominator, never missing from it.
@@ -7397,12 +7933,16 @@ P.uptime = c => {
   };
 
   return `
-  <div class="ph reveal">
-    <div class="k">🟢 Uptime</div>
-    <h1>เครื่องพร้อมใช้งานกี่ % ของเวลาที่ควรเปิด</h1>
-    <p>Uptime (%) = (เวลาที่ควรเปิดทั้งหมด − Downtime รวม) ÷ เวลาที่ควรเปิดทั้งหมด × 100 ·
-       เป้าทั้งสองแบรนด์ <b>${UPTIME_TARGET.toFixed(2)}%</b></p>
-  </div>
+  ${pageHead({
+    k: '🟢 Uptime',
+    h1: 'เครื่องพร้อมใช้งานกี่ % ของเวลาที่ควรเปิด',
+    facts: [
+      {ic:'🎯', v: UPTIME_TARGET.toFixed(2) + '%', l:'เป้าทั้งสองแบรนด์', tone:'good'},
+      {ic:'🏪', v:'QW 08:00–20:00', l:'เวลาที่ควรเปิด'},
+      {ic:'🌙', v:'WAG 24 ชม.', l:'เปิดตลอด'},
+      {ic:'📅', v: esc(monthLabel(per.curMonth)), l:'เดือนที่กำลังดู', tone:'info'},
+    ],
+  })}
 
   ${editBanner(c)}
   ${runningNote(per)}
@@ -7444,20 +7984,47 @@ P.uptime = c => {
 
   <div style="height:14px"></div>
 
-  <div class="card" style="padding:15px 17px">
-    <p class="eyebrow" style="margin-bottom:7px">คิดมาจากอะไร</p>
-    <ul style="font-size:var(--t-sm);color:var(--ink2);line-height:1.95;padding-left:18px">
-      <li><b>เวลาที่ควรเปิดทั้งหมด</b> = ชั่วโมงเปิดต่อวัน × จำนวนวัน × จำนวนสาขาของแบรนด์นั้น
-        ${cur.rows.map(r => `<br><span style="color:var(--muted)">${esc(r.brand)}: ${n0(r.perDay)} ชม./วัน × ${n0(r.days)} วัน × ${n0(r.branches)} สาขา = <b class="tab">${n0(r.capacity)}</b> ชม.</span>`).join('')}</li>
-      <li><b>Downtime รวม</b> = ชั่วโมงที่เครื่องเสีย<b>เฉพาะช่วงที่ร้านเปิด</b> —
-        QW 08:00–20:00 · WAG ตลอด 24 ชม. (เสียตอนร้านปิดไม่นับ เพราะลูกค้าใช้ไม่ได้อยู่แล้ว)</li>
-      <li>ต่างจากชั่วโมงที่ใช้วัดงานช่างในหน้าอื่น ซึ่งนับเฉพาะ ${BIZ.open}:00–${BIZ.close}:00 ที่ช่างทำงานได้ —
-        คนละคำถามกัน จึงเป็นคนละตัวเลข</li>
-      <li>เป้า ${UPTIME_TARGET.toFixed(2)}% แปลว่ายอมให้เสียได้ <b class="tab">${n1(100 - UPTIME_TARGET)}%</b> ของเวลาที่ควรเปิด
-        = <b class="tab">${n1(cur.budget)}</b> ชม. ในเดือนนี้ทั้งกลุ่ม</li>
-      <li>ใบงานที่เปิดค้างเกิน ${BIZ.capDays} วันทำการ ถูกตัดเพดานเหมือนกับหน้าอื่น เพื่อไม่ให้ “ลืมปิดงาน”
-        กลายเป็น uptime ที่ดูแย่เกินจริง</li>
-    </ul>
+  <div class="card reveal" style="padding:15px 17px">
+    <p class="eyebrow" style="margin-bottom:11px">คิดมาจากอะไร</p>
+    ${(() => {
+      /* The formula, drawn as the three quantities it actually divides — one
+         box per term, with this month's own numbers in them. Four bullet
+         points describing a division is the thing a division should show. */
+      const cap = cur.capacity;
+      const box = (lbl, val, unit, col) => `<div style="flex:1 1 150px;min-width:132px;
+        background:var(--surface2);border:1px solid var(--line);border-left:3px solid ${col};
+        border-radius:11px;padding:10px 13px">
+        <p style="font-size:var(--t-2xs);color:var(--muted)">${lbl}</p>
+        <p class="tab" style="font-size:var(--t-lg);font-weight:750;color:${col};margin-top:2px">${val}<small
+          style="font-size:var(--t-2xs);color:var(--muted);font-weight:600;margin-left:4px">${unit}</small></p></div>`;
+      const op = s => `<div style="font-size:19px;color:var(--muted);align-self:center;font-weight:700">${s}</div>`;
+      return `<div style="display:flex;flex-wrap:wrap;gap:9px;align-items:stretch">
+        ${box('เวลาที่ควรเปิดทั้งหมด', n0(cap), 'ชม.', 'var(--info)')}
+        ${op('−')}
+        ${box('เครื่องหยุดตอนร้านเปิด', n1(cur.down), 'ชม.', 'var(--crit)')}
+        ${op('=')}
+        ${box('พร้อมใช้งานจริง', n1(cur.pct), '%', cur.pct >= UPTIME_TARGET ? 'var(--good)' : 'var(--crit)')}
+      </div>
+      <div style="margin-top:11px">${targetBar(cur.down, cur.budget,
+        {tlabel: 'โควตาที่ยอมได้ ' + n1(cur.budget) + ' ชม.',
+         title: 'เสียไป ' + n1(cur.down) + ' ชม. จากโควตา ' + n1(cur.budget) + ' ชม.'})}</div>
+      ${why('สูตรเต็ม และทำไมตัวเลขนี้ไม่เท่ากับหน้าอื่น', `
+        <b>Uptime (%) = (เวลาที่ควรเปิดทั้งหมด − Downtime รวม) ÷ เวลาที่ควรเปิดทั้งหมด × 100</b>
+        <ul style="margin:7px 0 0;padding-left:17px">
+          <li><b>เวลาที่ควรเปิดทั้งหมด</b> = ชั่วโมงเปิดต่อวัน × จำนวนวัน × จำนวนสาขาของแบรนด์นั้น
+            ${cur.rows.map(r => `<br>${esc(r.brand)}: ${n0(r.perDay)} ชม./วัน × ${n0(r.days)} วัน ×
+              ${n0(r.branches)} สาขา = <b class="tab">${n0(r.capacity)}</b> ชม.`).join('')}</li>
+          <li><b>Downtime รวม</b> = ชั่วโมงที่เครื่องเสีย<b>เฉพาะช่วงที่ร้านเปิด</b> —
+            QW 08:00–20:00 · WAG ตลอด 24 ชม. (เสียตอนร้านปิดไม่นับ เพราะลูกค้าใช้ไม่ได้อยู่แล้ว)</li>
+          <li>ต่างจากชั่วโมงที่ใช้วัดงานช่างในหน้าอื่น ซึ่งนับเฉพาะ ${BIZ.open}:00–${BIZ.close}:00
+            ที่ช่างเข้าซ่อมได้ — คนละคำถามกัน จึงเป็นคนละตัวเลข</li>
+          <li>เป้า ${UPTIME_TARGET.toFixed(2)}% แปลว่ายอมให้เสียได้
+            <b class="tab">${n1(100 - UPTIME_TARGET)}%</b> ของเวลาที่ควรเปิด =
+            <b class="tab">${n1(cur.budget)}</b> ชม. ในเดือนนี้ทั้งกลุ่ม</li>
+          <li>ใบงานที่เปิดค้างเกิน ${BIZ.capDays} วันทำการ ถูกตัดเพดานเหมือนหน้าอื่น เพื่อไม่ให้
+            “ลืมปิดงาน” กลายเป็น uptime ที่ดูแย่เกินจริง</li>
+        </ul>`)}`;
+    })()}
   </div>`;
 };
 
@@ -7542,12 +8109,12 @@ P.dataset = c => {
   /* Same rule as the editor: the bar is obeyed by default, because "ดูเฉพาะ QW
      เดือนนี้" is what people mean when they set it. The whole-database view is
      one click away, and the heading says which one is on screen. */
-  const scope = S.followFilter ? applyFilters(c.corrected, S.f) : c.corrected;
+  const scope = S.dsFollow ? applyFilters(c.corrected, S.f) : c.corrected;
   const inv = inventory(scope);
   const src = bySource(scope);
   const per = c.per;
   const files = S.sources.filter(s => s.kind !== ROSTER_KIND)
-    .filter(s => !S.followFilter || src.has(s.name));
+    .filter(s => !S.dsFollow || src.has(s.name));
   const pending = unsavedAdds();
   const both = inv.brands.length > 1;
 
@@ -7647,11 +8214,16 @@ P.dataset = c => {
     <h1>ฐานข้อมูลนี้มีอะไรอยู่บ้าง</h1>
     <p>แยกตาม<b>ปี → เดือน</b> และบอกว่าแต่ละเดือนมาจากไฟล์ไหน ·
        กดที่ช่องเดือนเพื่อกรองดูเฉพาะเดือนนั้น<br>
-       ${S.followFilter
+       ${S.dsFollow
          ? '<b style="color:var(--good-ink)">กำลังเดินตามตัวกรองด้านบน</b> — เห็นเฉพาะชุดที่กรองไว้'
          : '<b style="color:var(--warn-ink)">กำลังแสดงทั้งฐานข้อมูล</b> — ไม่สนตัวกรองด้านบน'}
-       <button class="btn sm${S.followFilter ? ' on' : ''}" id="dsFollow" style="margin-left:6px"
-         >${S.followFilter ? '🔗 ตามตัวกรอง' : '🗂 ทั้งฐานข้อมูล'}</button></p>
+       ${/* Same rule as the editor: the sentence above is the state, the button
+             says what pressing it will do. This switch is this page's alone —
+             it no longer drags the editor with it. */''}
+       <button class="btn sm" id="dsFollow" style="margin-left:6px"
+         title="${S.dsFollow ? 'ดูทั้งฐานข้อมูล โดยไม่สนตัวกรองด้านบน (เฉพาะหน้านี้)'
+                             : 'กลับไปแสดงเฉพาะชุดที่ตัวกรองด้านบนเลือกไว้ (เฉพาะหน้านี้)'}"
+         >${S.dsFollow ? '🗂 ดูทั้งฐานข้อมูลแทน' : '🔗 กลับไปตามตัวกรอง'}</button></p>
   </div>
 
   ${inv.gaps.length ? `<div class="banner warn reveal" style="margin-bottom:14px">
@@ -7898,8 +8470,16 @@ const fileFlag = v => { const t = String(v || '').trim();
 
 /* Every ticket in the export is already closed — การดำเนินการซ่อม reads
    "เสร็จแล้ว" on all of them — so nothing here is a backlog. What varies is how
-   long a finished job took to close, and that is what this threshold measures. */
-const SLOW_H = 24;
+   long a finished job took to close, and that is what this threshold measures.
+
+   It is stated in WORKING DAYS, not hours, because the counted day is a
+   setting. This was a hard-coded 24 while a counted day was nine hours; when
+   the window was corrected to 09:00–17:00 the three-day cap also became 24, so
+   `hours > 24` could never be true again and three separate recommendations
+   quietly stopped finding any tickets at all. Two days keeps the rule strictly
+   under the cap whatever the window is. */
+const SLOW_DAYS = 2;
+const SLOW_H = SLOW_DAYS * (BIZ.close - BIZ.open);
 const URGENT = /ด่วน/;
 
 /* Why a job took longer than it should have, straight from the file rather than
@@ -8014,6 +8594,9 @@ const GAP_KINDS = {
 /** Skill is the foundation and knowledge builds on it, but knowledge is the
     quicker win — so the plan leads with what can be taught now. */
 const GAP_ORDER = ['knowledge', 'skill', 'process', 'supply'];
+/** One colour per kind of gap, used by the header tiles, the legend and the
+    chips alike — derived in one place so the three can never drift apart. */
+const GAP_COLOR = {knowledge:'var(--warn)', skill:'var(--orange)', process:'var(--info)', supply:'var(--crit)'};
 
 /** Sort a team's evidence into gaps. Rules that read a recorded field beat
     rules that infer from duration, so they come first. Each one states the
@@ -8058,8 +8641,8 @@ function teamGaps(t, fleet){
   if(t.slowPct >= 20){
     const parts = t.recs.filter(r => r.hours > SLOW_H && heavy.test(r.category));
     const isSupply = parts.length >= Math.max(2, t.slow * 0.3);
-    add(isSupply ? 'supply' : 'knowledge', 'ใช้เวลาปิดงานนานกว่าหนึ่งวัน',
-      `${n0(t.slow)} ใบใช้เวลาตั้งแต่แจ้งจนปิดเกิน ${SLOW_H} ชม. (${pc(t.slowPct, 0)} ของใบที่มีเวลา) รวม ${hr(t.slowHours)}` +
+    add(isSupply ? 'supply' : 'knowledge', `ใช้เวลาปิดงานนานกว่า ${SLOW_DAYS} วันทำการ`,
+      `${n0(t.slow)} ใบใช้เวลาตั้งแต่แจ้งจนปิดเกิน ${SLOW_DAYS} วันทำการ (${SLOW_H} ชม. ที่นับได้) — ${pc(t.slowPct, 0)} ของใบที่มีเวลา รวม ${hr(t.slowHours)}` +
         (parts.length ? ` · ${n0(parts.length)} ใบอยู่ในกลุ่มปั๊ม/มอเตอร์/โบลเวอร์` : ''),
       isSupply
         ? 'กระจุกอยู่ที่อุปกรณ์ที่ต้องรออะไหล่ — ตั้งสต็อกขั้นต่ำของอะไหล่กลุ่มนี้ ฝึกช่างไม่ช่วยเรื่องนี้'
@@ -8068,12 +8651,12 @@ function teamGaps(t, fleet){
   }
   if(t.urgent >= 8 && t.urgentSlowPct >= 20)
     add('process', 'งานด่วนใช้เวลาปิดพอ ๆ กับงานไม่ด่วน',
-      `งานที่ระบุว่าด่วน ${n0(t.urgent)} ใบ มี ${n0(t.urgentSlow)} ใบใช้เวลาเกิน ${SLOW_H} ชม. (${pc(t.urgentSlowPct, 0)})`,
+      `งานที่ระบุว่าด่วน ${n0(t.urgent)} ใบ มี ${n0(t.urgentSlow)} ใบใช้เวลาเกิน ${SLOW_DAYS} วันทำการ (${pc(t.urgentSlowPct, 0)})`,
       'ความเร่งด่วนยังไม่ถูกใช้จัดลำดับจริง — ต้องเรียงคิวตามความด่วนตอนจ่ายงาน ไม่ใช่ตามลำดับที่แจ้งเข้ามา',
       'เห็นผลทันทีที่เปลี่ยนวิธีจ่ายงาน', t.urgentSlowRecs);
   if(t.vaguePct >= 25 && t.slow >= 4)
     add('knowledge', 'ใบที่ใช้เวลานาน คือใบที่ยังไม่รู้ว่าเสียอะไร',
-      `${pc(t.vaguePct, 0)} ของใบที่ใช้เวลาเกิน ${SLOW_H} ชม. ลงหมวด “อื่นๆ / ไม่ระบุชุดอุปกรณ์”`,
+      `${pc(t.vaguePct, 0)} ของใบที่ใช้เวลาเกิน ${SLOW_DAYS} วันทำการ ลงหมวด “อื่นๆ / ไม่ระบุชุดอุปกรณ์”`,
       'สอนลำดับการตรวจให้เป็นขั้น — ตรวจของที่ง่ายและถูกก่อน แล้วค่อยไปของที่ต้องรื้อ ' +
       'และบังคับให้ระบุชุดอุปกรณ์ก่อนปิดงานทุกใบ',
       'เห็นผลใน 2–4 สัปดาห์', t.vagueRecs);
@@ -8155,7 +8738,7 @@ P.team = c => {
   const repAll = R.map(r => fileFlag(r.slaRepair)).filter(v => v !== null);
   const failed = R.filter(r => slaPass(r) === false);
   /* "ข้ามวัน" is now a fact on the ticket, not a threshold: counted hours stop
-     at 18:00 and restart at 09:00, so a job whose wall-clock gap is longer than
+     at 17:00 and restart at 09:00, so a job whose wall-clock gap is longer than
      its counted hours is exactly a job that ran past a closing time. */
   const crossedNight = r => r.hoursRaw != null && r.hours != null && r.hoursRaw > r.hours + 0.1;
   const slowAll = wh.filter(crossedNight);
@@ -8167,22 +8750,40 @@ P.team = c => {
   const num = (f, v) => `<input class="inp tab" type="number" min="1" max="72" step="1" data-sla="${f}"
     value="${esc(v)}" style="width:62px;height:28px;text-align:center">`;
 
+  /* The paragraph this replaced carried the page's whole frame — four kinds of
+     lost time, each fixed a different way. As four tiles it is the legend the
+     rest of the page reads against, instead of five lines nobody finishes. */
+  const GAPS = GAP_ORDER.map(k => {
+    const [name, desc, , ic] = GAP_KINDS[k];
+    const cut = desc.split(' — ');
+    return {k, ic, t: name, d: cut[0], w: cut[1] || '', c: GAP_COLOR[k]};
+  });
   return `
-  <div class="ph reveal">
-    <div class="k">👷 Team &amp; SLA</div>
-    <h1>ทีมช่างต้องพัฒนาอะไร ถึงจะทำผ่าน SLA</h1>
-    <p>ทุกตัวเลขในหน้านี้<b>ตามตัวกรองด้านบน</b>เหมือนหน้าอื่น ·
-       ใบงานในไฟล์<b>ปิดครบทุกใบแล้ว</b> (ช่อง “การดำเนินการซ่อม” ระบุว่าเสร็จแล้วทั้งหมด)
-       สิ่งที่ต่างกันคือ<b>ใช้เวลานานแค่ไหนกว่าจะปิด</b> หน้านี้จึงแยกว่าเวลาที่หายไปเป็นเรื่อง
-       <b>ความรู้</b> (สอนกันได้ · เป็นสัปดาห์) · <b>ทักษะ</b> (ต้องทำซ้ำจนชำนาญ · เป็นเดือน) ·
-       <b>กระบวนการ</b> หรือ <b>ของที่ต้องรอ</b> — สองอย่างหลังฝึกช่างเท่าไรก็ไม่หาย</p>
+  ${pageHead({
+    k: '👷 Team &amp; SLA',
+    h1: 'ทีมช่างต้องพัฒนาอะไร ถึงจะทำผ่าน SLA',
+    facts: [
+      {ic:'📋', v: n0(R.length), l:'ใบงานตามตัวกรองด้านบน'},
+      {ic:'✅', v:'ปิดครบทุกใบ', l:'ในไฟล์', tone:'good', title:'ช่อง “การดำเนินการซ่อม” ระบุว่าเสร็จแล้วทั้งหมด'},
+      {ic:'⏱', v:'เวลาที่ใช้ปิด', l:'คือสิ่งที่ต่างกัน', tone:'info'},
+    ],
+  })}
+
+  <div class="grid g4 reveal" style="margin-bottom:14px">
+    ${GAPS.map(g => `<div class="card" style="padding:12px 14px;border-left:3px solid ${g.c}">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:17px">${g.ic}</span>
+        <b style="font-size:var(--t-sm)">${g.t}</b></div>
+      <p style="font-size:var(--t-2xs);color:var(--muted);margin-top:5px;line-height:1.6">${g.d}<br>
+        <span style="color:${g.c};font-weight:700">${g.w}</span></p>
+    </div>`).join('')}
   </div>
 
   ${rosterSection(c)}
 
   <section class="card reveal" style="margin-bottom:14px">
-    <div class="hd"><div><h3>กติกา SLA ที่ใช้คำนวณ</h3>
-      <p>แก้ได้ถ้ากติกาเปลี่ยนอีก · เก็บไว้ในเครื่องนี้</p></div></div>
+    <div class="hd"><div><h3>กติกา SLA ที่ใช้คำนวณ</h3></div>
+      <div><span class="chip">✏️ แก้ได้</span> <span class="chip">💾 เก็บในเครื่องนี้</span></div></div>
     <div class="bd" style="display:flex;gap:22px;flex-wrap:wrap;align-items:flex-end">
       <div>
         <p class="eyebrow" style="margin-bottom:6px">ก่อน ${esc(monthLabel(S.sla.from))}</p>
@@ -8197,16 +8798,24 @@ P.team = c => {
           เครื่องหยุด ${num('stopAfter', S.sla.stopAfter)} ชม.
           · ไม่หยุด ${num('goAfter', S.sla.goAfter)} ชม.</div>
       </div>
-      <span style="flex:1"></span>
-      <p style="font-size:var(--t-xs);color:var(--muted);max-width:48ch">
-        กำลังดู ${n0(R.length)} ใบงานตามตัวกรองด้านบน — ${n0(stoppedN)} เครื่องหยุด ·
-        ${n0(goingN)} ไม่หยุด${S.f.stoppedOnly
-          ? ' <b style="color:var(--warn-ink)">(ตัวกรอง “เฉพาะเครื่องหยุด” เปิดอยู่ ' +
-            'จึงยังไม่เห็นงานที่ใช้เกณฑ์ ' + n0(S.sla.goAfter) + ' ชม. — ปิดตัวกรองเพื่อดูทั้งหมด)</b>'
-          : ''}<br>
-        ใบงานที่ไม่ได้กรอกระยะเวลา (${n0(noHours)} ใบ) <b>ไม่ถูกนับว่าตก SLA</b> —
-        ตัดสินไม่ได้ก็ไม่ตัดสิน</p>
+      <div style="flex:1 1 300px;min-width:240px">
+        ${stackBar([
+          {v: stoppedN, l:'เครื่องหยุด', c:'var(--crit)'},
+          {v: goingN, l:'ไม่หยุด', c:'var(--info)'},
+          {v: R.length - stoppedN - goingN, l:'ไม่ระบุ', c:'var(--line2)'},
+        ])}
+        <div class="brow" style="margin-top:8px">
+          <span class="chip ${noHours ? 'warn' : ''}">⏳ ไม่มีชั่วโมง ${n0(noHours)} ใบ · ไม่นับว่าตก</span>
+          ${S.f.stoppedOnly ? `<button class="btn sm" data-fset="stoppedOnly"
+            title="ปิดตัวกรองเพื่อให้เห็นงานที่ใช้เกณฑ์ ${n0(S.sla.goAfter)} ชม.">👁 ดูงานที่เครื่องไม่หยุดด้วย</button>` : ''}
+        </div>
+      </div>
     </div>
+    <div class="bd" style="padding-top:0">${why('ใบที่ตัดสินไม่ได้ นับยังไง',
+      `ใบงาน ${n0(noHours)} ใบไม่ได้กรอกระยะเวลา จึง<b>ตัดสินไม่ได้</b>ว่าผ่านหรือตก SLA —
+       ระบบไม่นับว่าตก และ<b>ไม่นับเข้าตัวหาร</b>ด้วย เปอร์เซ็นต์ที่เห็นจึงคิดจากเฉพาะใบที่ตัดสินได้
+       ${S.f.stoppedOnly ? `<br>ตัวกรอง “เฉพาะเครื่องหยุด” เปิดอยู่ หน้านี้จึงยังไม่เห็นงานที่ใช้เกณฑ์
+       ${n0(S.sla.goAfter)} ชม. (งานที่เครื่องไม่หยุด) — ปิดตัวกรองด้านบนเพื่อดูทั้งหมด` : ''}`)}</div>
   </section>
 
   <div class="grid g5" style="margin-bottom:14px">
@@ -8224,17 +8833,37 @@ P.team = c => {
       sub:`ใบที่ใช้เวลาข้ามวันกิน ${pc(overHours ? slowOver/overHours*100 : 0, 0)} ของก้อนนี้`, tone:'orange', d:5})}
   </div>
 
-  <div class="banner crit reveal" style="margin-bottom:14px">
-    <span class="i">🎯</span>
-    <div style="line-height:1.85"><b>เรื่องหลักที่ต้องแก้:</b>
-      เวลาปิดงานกลางของทั้งบริษัทคือ <b>${n1(fleet.med0)} ชม.</b> ซึ่งอยู่ในกติกาอยู่แล้ว —
-      ที่ทำให้ SLA ตกคือ <b>${n0(slowAll.length)} ใบที่ซ่อมข้ามวัน</b>
-      (${pc(failed.length ? slowAll.filter(r => slaPass(r) === false).length/failed.length*100 : 0, 0)} ของใบที่ตก SLA)
-      ซึ่งกิน <b>${pc(overHours ? slowOver/overHours*100 : 0, 0)}</b> ของชั่วโมงที่เกินกติกาทั้งหมด<br>
-      <span style="font-size:var(--t-xs);opacity:.9">ใบงานในไฟล์ปิดครบทุกใบแล้ว —
-        ปัญหาอยู่ที่<b>บางใบใช้เวลานานผิดปกติ</b> ซึ่งเกิดจากคนละสาเหตุกัน
-        และหน้านี้แยกให้แล้วว่าใบไหนเป็นเรื่องอะไร</span></div>
-  </div>
+  ${bannerV({
+    tone: 'crit', ic: '🎯',
+    title: 'ปัญหาไม่ใช่ว่างานช้าทั้งหมด — แต่เป็นใบที่ซ่อมข้ามวัน',
+    /* The sentence this replaced asked the reader to hold three percentages
+       in their head at once. Two bars put the median next to the rule, and
+       the share of over-time hours next to the whole. */
+    graphic: `<div style="flex:1 1 320px;min-width:260px;display:grid;gap:9px">
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:var(--t-2xs);margin-bottom:4px">
+          <span>เวลาปิดงานกลางของทั้งบริษัท</span>
+          <b class="tab">${n1(fleet.med0)} ชม.</b></div>
+        ${targetBar(fleet.med0, S.sla.stopAfter, {tlabel: 'กติกา ' + n0(S.sla.stopAfter) + ' ชม.'})}
+      </div>
+      <div style="margin-top:7px">
+        <div style="display:flex;justify-content:space-between;font-size:var(--t-2xs);margin-bottom:4px">
+          <span>ชั่วโมงที่เกินกติกา มาจากใบที่ซ่อมข้ามวัน</span>
+          <b class="tab">${pc(overHours ? slowOver / overHours * 100 : 0, 0)}</b></div>
+        <span class="track" style="height:13px"><i data-pct="${overHours ? slowOver / overHours * 100 : 0}"
+          style="background:var(--crit)"></i></span>
+      </div>
+    </div>`,
+    chips: `<span class="chip crit">🌙 ซ่อมข้ามวัน ${n0(slowAll.length)} ใบ</span>
+      <span class="chip">= ${pc(failed.length ? slowAll.filter(r => slaPass(r) === false).length / failed.length * 100 : 0, 0)} ของใบที่ตก SLA</span>
+      <span class="chip good">✅ ปิดครบทุกใบแล้ว</span>`,
+    why: 'แล้วเวลาปิดงานกลางที่อยู่ในกติกา แปลว่าอะไร',
+    body: `ใบงานในไฟล์<b>ปิดครบทุกใบแล้ว</b> และเวลาปิดงานกลางของทั้งบริษัท
+      (${n1(fleet.med0)} ชม.) ก็อยู่ในกติกาอยู่แล้ว —
+      ปัญหาจึงไม่ใช่ว่า “ช่างทำงานช้าทั้งองค์กร” แต่อยู่ที่<b>บางใบใช้เวลานานผิดปกติ</b>
+      ซึ่งเกิดจากคนละสาเหตุกัน (ความรู้ · ทักษะ · กระบวนการ · ของที่ต้องรอ)
+      และหน้านี้แยกให้แล้วว่าใบไหนเป็นเรื่องอะไร`,
+  })}
 
   ${bare('เทียบทุกทีม',
     tableHTML([{h:'ทีม'},{h:'แบรนด์'},{h:'ใบงาน', num:1},{h:'สาขา', num:1},
@@ -8242,7 +8871,7 @@ P.team = c => {
       // team actually worked, the other is the area the roster assigns them
       ...(roster() ? [{h:'สาขาที่ดูแลตามไฟล์ช่าง', num:1}] : []),
       {h:'SLA ซ่อม', num:1},{h:'SLA รับงาน', num:1},{h:'เวลากลาง', num:1},{h:'p90', num:1},
-      {h:`ปิดช้า >${SLOW_H}ชม.`, num:1},{h:'หน้าร้านจบเอง', num:1},{h:'ไม่เขียนอาการ', num:1},{h:'ไม่กรอกเวลา', num:1}],
+      {h:`ปิดช้า >${SLOW_DAYS} วันทำการ`, num:1},{h:'หน้าร้านจบเอง', num:1},{h:'ไม่เขียนอาการ', num:1},{h:'ไม่กรอกเวลา', num:1}],
       teams.map(t => {
         const tone = v => v == null ? '<span style="color:var(--muted)">—</span>'
           : `<span style="color:var(--${v >= 80 ? 'good' : v >= 55 ? 'warn' : 'crit'}-ink)">${pc(v, 0)}</span>`;
@@ -8270,16 +8899,17 @@ P.team = c => {
             : '<span style="color:var(--muted)">—</span>',
           pc(t.noDetail, 0), pc(t.noHours, 0)];
       }), {maxH: 420}),
-    'SLA ซ่อม = คำนวณตามกติกาด้านบน · p90 = ช้ากว่านี้แค่ 10% ของใบงาน · ' +
-    'หน้าร้านจบเอง = พนักงานสาขาแก้จบเองโดยช่างไม่ต้องเข้า (ช่อง “การแก้ไข” มีเฉพาะ QW) · ยิ่งสูงยิ่งดี' +
-    (roster() ? ' · “สาขา” = สาขาที่ทีมนี้มีใบงานจริงในช่วงที่กรอง ส่วน ' +
-      '“สาขาที่ดูแลตามไฟล์ช่าง” = เขตพื้นที่ที่ไฟล์ช่างระบุไว้ — เป็นคนละตัวเลข ห้ามเอามารวมกัน' : ''))}
+    '', '<div style="max-width:46ch">' + why('หัวตารางแต่ละช่องหมายถึงอะไร',
+      '<b>SLA ซ่อม</b> = คำนวณตามกติกาด้านบน<br>' +
+      '<b>p90</b> = ช้ากว่านี้แค่ 10% ของใบงาน — ตัวแทนของ “ใบที่แย่ที่สุด” ที่ไม่ถูกค่าสุดโต่งลากไป<br>' +
+      '<b>หน้าร้านจบเอง</b> = พนักงานสาขาแก้จบเองโดยช่างไม่ต้องเข้า ' +
+      '(ช่อง “การแก้ไข” มีเฉพาะ QW เพราะ WAG ไม่มีพนักงานหน้าร้าน) · <b>ยิ่งสูงยิ่งดี</b>' +
+      (roster() ? '<br><b>สาขา</b> = สาขาที่ทีมนี้มีใบงานจริงในช่วงที่กรอง ส่วน ' +
+        '<b>สาขาที่ดูแลตามไฟล์ช่าง</b> = เขตพื้นที่ที่ไฟล์ช่างระบุไว้ — เป็นคนละตัวเลข ห้ามเอามารวมกัน' : '')) + '</div>')}
 
   <section class="card" style="margin-top:14px;margin-bottom:14px">
-    <div class="hd"><div><h3>แต่ละทีมต้องพัฒนาอะไร</h3>
-      <p>ความรู้กับทักษะไม่ใช่เรื่องเดียวกัน — <b>ความรู้สอนกันได้ ถ่ายทอดได้ เห็นผลเป็นสัปดาห์</b>
-        ส่วน<b>ทักษะต้องลงมือทำซ้ำจนชำนาญ ใช้เวลาเป็นเดือน เร่งไม่ได้</b>
-        และทักษะเป็นฐานให้ความรู้ที่สอนเพิ่มไปต่อยอด · ทุกข้อมีตัวเลขที่ทำให้สรุปแบบนั้นกำกับไว้</p></div></div>
+    <div class="hd"><div><h3>แต่ละทีมต้องพัฒนาอะไร</h3></div>
+      <div>${legendRow(GAP_ORDER.map(k => ({c: GAP_COLOR[k] || 'var(--line2)', l: GAP_KINDS[k][0]})))}</div></div>
     <div class="bd" style="display:flex;flex-direction:column;gap:12px">
       ${teams.map((t, i) => {
         const gaps = teamGaps(t, fleet);
@@ -8299,6 +8929,9 @@ P.team = c => {
                 .filter(([, list]) => list.length)
                 .map(([k, list]) => {
                   const m = GAP_KINDS[k];
+                  /* Each finding used to print four stacked lines. The headline
+                     and the evidence are what a reader scans; what to do about
+                     it and how long it takes are what they open. */
                   return `<section class="gapgrp">
                     <header>
                       <span class="chip ${m[2]}">${m[3]} ${esc(m[0])}</span>
@@ -8306,11 +8939,12 @@ P.team = c => {
                       <span class="hint">${esc(m[1])}</span>
                     </header>
                     <ol>
-                      ${list.map(g => `<li>
+                      ${list.map(g => `<li style="border-left:2px solid ${GAP_COLOR[k]};padding-left:10px">
                         <b>${esc(g.title)}</b>
                         <p class="ev">📊 ${g.ev}</p>
-                        <p class="act">→ ${esc(g.do)}</p>
-                        <p class="mod">⏱ ${esc(g.when)}</p>
+                        ${why('→ ทำยังไง · ' + g.when,
+                          `<b style="color:var(--ink)">${esc(g.do)}</b>
+                           <span class="chip" style="margin-left:7px">⏱ ${esc(g.when)}</span>`)}
                         ${gapCases(g)}
                       </li>`).join('')}
                     </ol>
@@ -8359,16 +8993,25 @@ P.team = c => {
       }).join('')}
     </div>
     <div class="card" style="padding:16px 18px">
-      <p class="eyebrow" style="margin-bottom:9px">อ่านตัวเลขหน้านี้ยังไงให้ไม่ผิด</p>
-      <ul style="font-size:13.5px;color:var(--ink2);line-height:1.9;padding-left:18px;margin:0">
-        <li><b>SLA สองค่าไม่ตรงกันเป็นเรื่องปกติ</b> — ช่องในไฟล์อาจนับคนละนาฬิกากับกติกาชั่วโมงซ่อม
-          ต้องตกลงกันก่อนว่าจะยึดอันไหนเป็นทางการ</li>
-        <li><b>${n0(noHours)} ใบงานไม่มีระยะเวลา</b> — ไม่ถูกนับทั้งฝั่งผ่านและไม่ผ่าน
-          ทีมที่ไม่กรอกเวลาเยอะ ตัวเลข SLA จะดูดีเกินจริง</li>
-        <li><b>อย่าเทียบทีมข้ามแบรนด์ตรง ๆ</b> — งาน QW กับ WAG คนละเงื่อนไขเวลาเปิดและคนหน้างาน</li>
-        <li><b>ทีมที่ใบงานน้อย ตัวเลขแกว่ง</b> — ใช้ดูทิศทาง ไม่ใช้ตัดสินคน</li>
-        <li><b>“ค้างเพราะรออะไหล่” ไม่ใช่ความผิดช่าง</b> — ในหน้านี้จะถูกจัดเป็น 📦 ไม่ใช่เรื่องช่าง</li>
-      </ul>
+      <p class="eyebrow" style="margin-bottom:10px">อ่านตัวเลขหน้านี้ยังไงให้ไม่ผิด</p>
+      ${[
+        ['⚖️', 'SLA สองค่าไม่ตรงกันเป็นเรื่องปกติ',
+         'ช่องในไฟล์อาจนับคนละนาฬิกากับกติกาชั่วโมงซ่อม ต้องตกลงกันก่อนว่าจะยึดอันไหนเป็นทางการ'],
+        ['⏳', n0(noHours) + ' ใบงานไม่มีระยะเวลา',
+         'ไม่ถูกนับทั้งฝั่งผ่านและไม่ผ่าน ทีมที่ไม่กรอกเวลาเยอะ ตัวเลข SLA จะดูดีเกินจริง'],
+        ['🚫', 'อย่าเทียบทีมข้ามแบรนด์ตรง ๆ',
+         'งาน QW กับ WAG คนละเงื่อนไขเวลาเปิดและคนหน้างาน'],
+        ['📉', 'ทีมที่ใบงานน้อย ตัวเลขแกว่ง',
+         'ใช้ดูทิศทาง ไม่ใช้ตัดสินคน'],
+        ['📦', '“ค้างเพราะรออะไหล่” ไม่ใช่ความผิดช่าง',
+         'ในหน้านี้จะถูกจัดเป็น 📦 ไม่ใช่เรื่องช่าง'],
+      ].map(([ic, t, d]) => `<div style="display:flex;gap:9px;align-items:flex-start;padding:6px 0;
+        border-bottom:1px solid var(--line)">
+        <span style="font-size:15px;line-height:1.4;flex:0 0 auto">${ic}</span>
+        <span style="min-width:0">
+          <b style="font-size:12.8px;display:block;line-height:1.5">${t}</b>
+          <span style="font-size:var(--t-2xs);color:var(--muted);line-height:1.6">${d}</span></span>
+      </div>`).join('')}
     </div>
   </div>`;
 };
@@ -8406,10 +9049,11 @@ function rosterSection(c){
         <span style="font-size:19px">👷</span>
         <div style="flex:1;min-width:240px">
           <b style="font-size:var(--t-sm)">ยังไม่มีไฟล์ช่างที่รับผิดชอบสาขา</b>
-          <p style="font-size:var(--t-xs);color:var(--muted);margin-top:3px;line-height:var(--lh-body)">
-            ลากไฟล์รายชื่อช่างแยกตามพื้นที่ (.xls) มาวางในหน้าจัดการไฟล์ได้เลย
-            ระบบจะตรวจให้ว่าชื่อทีมในใบงานยังตรงกับพื้นที่ที่แต่ละคนดูแลหรือไม่
-            และสาขาไหนยังไม่มีเจ้าของ</p>
+          <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:7px">
+            <span class="chip">📄 ลากไฟล์ .xls มาวาง</span>
+            <span class="chip">✅ ตรวจชื่อทีมให้ตรงพื้นที่</span>
+            <span class="chip">🏳️ หาสาขาที่ยังไม่มีเจ้าของ</span>
+          </div>
         </div>
         <button class="btn sm" id="aNew">เปิดหน้าจัดการไฟล์</button>
       </div>
@@ -8971,6 +9615,73 @@ function renderTop(){
 /* ==========================================================================
    14. DRILL-DOWN DRAWER — Total → System → Branch → Machine → Failure
    ========================================================================== */
+/** Make a source-system label readable without inventing a word of it.
+    "5 - เซ็นเซอร์แปรงล้อสกปรก/สายขาด/เซ็นเซอร์ชำรุด (Wheel Wash Photocell)"
+    → head "เซ็นเซอร์แปรงล้อสกปรก" · also ["สายขาด","เซ็นเซอร์ชำรุด"]
+      code "5" · alias "Wheel Wash Photocell"
+    The code and the English name are what the technicians search by, so they
+    stay on screen — one line down, in small type, instead of in the headline
+    where a newcomer has to read past them to reach the Thai. */
+function readName(raw){
+  const full = String(raw || '').trim();
+  const code = (full.match(/^(\d+)\s*[-–]\s*/) || [])[1] || '';
+  let s = full.replace(/^\d+\s*[-–]\s*/, '');
+  let alias = '';
+  const m = s.match(/\(([^()]*[A-Za-z][^()]*)\)\s*$/);
+  if(m){ alias = m[1].trim(); s = s.slice(0, m.index).trim(); }
+  const parts = s.split(/\s*[\/,]\s*/).map(x => x.trim()).filter(Boolean);
+  return {full, code, alias, head: parts[0] || s || full, also: parts.slice(1)};
+}
+
+/** Why the counted hours are smaller than the clock, as a picture instead of a
+    paragraph: the day as a bar, with the hours that count shaded. Four lines of
+    Thai explaining a time window is exactly what a time window should draw. */
+function openHoursStrip(hours, rawHours){
+  const kept = rawHours > 0 ? Math.min(100, hours / rawHours * 100) : 100;
+  return `<div>
+    <p class="eyebrow" style="margin-bottom:7px">ชั่วโมงนี้นับยังไง</p>
+    ${hoursWindowBar()}
+    ${rawHours > hours + 0.5 ? `<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;
+      gap:10px;align-items:center;margin-top:6px">
+      <span class="track" style="height:9px"><i data-pct="${kept}" style="background:var(--crit)"></i></span>
+      <b class="tab" style="font-size:12px;white-space:nowrap">${n1(hours)} จาก ${n1(rawHours)} ชม.</b>
+    </div>
+    <p style="font-size:11.5px;color:var(--muted);margin-top:5px">
+      เวลาที่ผ่านไปจริงตั้งแต่แจ้งจนปิดงานคือ ${n1(rawHours)} ชม. — ช่วงที่ไม่มีช่างอยู่หน้างานไม่ถูกนับ</p>` : ''}
+  </div>`;
+}
+
+/** Twelve columns beat a sentence about a trend. Empty months are drawn as
+    gaps, not skipped, so a quiet month cannot masquerade as a busy one. */
+function monthSpark(recs){
+  const m = new Map();
+  for(const r of recs) if(r.month && r.hours != null) m.set(r.month, (m.get(r.month) || 0) + r.hours);
+  const keys = [...m.keys()].sort();
+  if(keys.length < 2) return '';
+  const all = [];
+  for(let k = keys[0]; k <= keys[keys.length - 1] && all.length < 24; k = addMonth(k, 1)) all.push(k);
+  const vals = all.map(k => m.get(k) || 0);
+  const max = Math.max(...vals, 1);
+  const W = 300, H = 46, gap = 4, base = 1;
+  const bw = (W - gap * (all.length - 1)) / all.length;
+  const bars = all.map((k, i) => {
+    const h = vals[i] > 0 ? Math.max(3, vals[i] / max * (H - base - 2)) : 0;
+    return h ? `<rect x="${(bw + gap) * i}" y="${H - base - h}" width="${bw}" height="${h}" rx="2"
+      fill="${vals[i] === max ? 'var(--crit)' : 'var(--s1)'}">
+      <title>${esc(monthLabel(k))} · ${n1(vals[i])} ชม.</title></rect>` : '';
+  }).join('');
+  return `<div>
+    <p class="eyebrow" style="margin-bottom:7px">หยุดกี่ชั่วโมงในแต่ละเดือน</p>
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="display:block;width:100%;height:46px">
+      ${bars}<rect x="0" y="${H - base}" width="${W}" height="${base}" fill="var(--line)"/></svg>
+    <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:var(--t-2xs);color:var(--muted)">
+      <span>${esc(monthLabel(all[0]))}</span>
+      <span>สูงสุด ${n1(max)} ชม.</span>
+      <span>${esc(monthLabel(all[all.length - 1]))}</span>
+    </div>
+  </div>`;
+}
+
 function openDrill(kind, key){
   S.drill = {kind, key};
   const recs = C.recs.filter(r => kind === 'branch' ? r.branchCode === key : r.category === key);
@@ -8983,6 +9694,21 @@ function openDrill(kind, key){
   const rep = repeats(recs, 2);
   const tech = techNotes(recs);
   const title = kind === 'branch' ? 'สาขา ' + key : key;
+  const nm = readName(title);
+
+  /* Scale and rank, so a reader who has never seen this dashboard knows
+     whether 18 hours is a lot. Peers are recomputed from the rows in view —
+     the same set the headline hours came from, never the whole database. */
+  const peers = pareto(groupBy(C.recs, r => kind === 'branch' ? r.branchCode : r.category), 'hours');
+  const rank = peers.findIndex(g => g.key === key) + 1;
+  const totalH = sum(C.recs.filter(r => r.hours != null), r => r.hours);
+  const share = totalH ? hours / totalH * 100 : 0;
+  const unitWord = kind === 'branch' ? 'สาขา' : 'ระบบ';
+  const ms = uniq(recs.map(r => r.month).filter(Boolean)).sort();
+  const span = !ms.length ? 'ช่วงที่กรองอยู่'
+    : ms.length === 1 ? monthLabel(ms[0])
+    : monthLabel(ms[0]) + ' – ' + monthLabel(ms[ms.length - 1]);
+  const places = uniq(recs.map(r => kind === 'branch' ? r.category : r.branchCode).filter(Boolean));
 
   $('drill').className = 'open';
   $('drill').innerHTML = `
@@ -8991,47 +9717,106 @@ function openDrill(kind, key){
       <div style="display:flex;justify-content:space-between;gap:12px;padding:15px 18px;border-bottom:1px solid var(--line)">
         <div style="min-width:0">
           <p class="eyebrow">${kind === 'branch' ? 'เจาะลึกรายสาขา' : 'เจาะลึกรายระบบ'}</p>
-          <h3 style="font-size:17px;font-weight:750;margin-top:3px;line-height:1.3">${esc(title)}</h3>
-          <p style="font-size:12.5px;color:var(--muted);margin-top:3px">
-            ${n0(recs.length)} ใบงาน · ${hr(hours)} · เครื่องหยุดจริง ${n0(stopped)} ครั้ง${
-              rawHours > hours + 0.5 ? ` · <span title="เวลาจริงตั้งแต่แจ้งจนปิดงาน ก่อนตัดชั่วโมงนอกเวลาทำการ">เวลาจริง ${hr(rawHours)}</span>` : ''}</p>
+          <h3 style="font-size:17px;font-weight:750;margin-top:3px;line-height:1.3"
+            title="${esc(nm.full)}">${esc(nm.head)}</h3>
+          ${nm.also.length ? `<p style="font-size:12.5px;color:var(--muted);margin-top:3px">
+            รวมอาการ: ${esc(nm.also.join(' · '))}</p>` : ''}
+          ${nm.code || nm.alias ? `<p class="tab" style="font-size:11.5px;color:var(--muted);margin-top:2px">
+            ${nm.code ? 'รหัสระบบ ' + esc(nm.code) : ''}${nm.code && nm.alias ? ' · ' : ''}${esc(nm.alias)}</p>` : ''}
         </div>
         <button class="btn sm ghost" data-closedrill style="flex:0 0 auto">✕</button>
       </div>
       <div style="flex:1;overflow-y:auto;padding:16px 18px;display:flex;flex-direction:column;gap:16px">
-        <div class="grid g3" style="gap:9px">
-          ${[['Downtime', n1(hours), 'ชม.', 'crit'], ['จำนวนครั้ง', n0(recs.length), 'ครั้ง', 'warn'],
-            ['เฉลี่ย/ครั้ง', n1(withH.length ? hours / withH.length : 0), 'ชม.', 'info']]
-            .map(([l, v, u, t]) => `<div style="background:var(--surface2);border-radius:11px;padding:10px 12px">
-              <p class="eyebrow">${l}</p>
-              <b class="tab" style="font-size:20px;color:var(--${t}-ink)">${v}</b>
-              <span style="font-size:12px;color:var(--muted)"> ${u}</span></div>`).join('')}
+        ${/* The headline as one figure and a row of chips rather than a
+             paragraph: period, how often, where and how long should land in a
+             glance. The share is a bar with a rank badge for the same reason —
+             "8.8%" means nothing until you see how much of the track it fills. */''}
+        <div style="background:var(--surface2);border-radius:13px;padding:13px 15px">
+          <p class="eyebrow">เครื่องหยุดให้บริการ</p>
+          <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
+            <b class="tab" style="font-size:34px;line-height:1.05;color:var(--crit-ink)">${n1(hours)}</b>
+            <span style="font-size:13px;color:var(--muted)">ชั่วโมง</span>
+            ${rawHours > hours + 0.5
+              ? `<span style="font-size:11.5px;color:var(--muted)">· นาฬิกาจริง ${n1(rawHours)} ชม.</span>` : ''}
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+            <span class="chip warn">🔁 เสีย ${n0(recs.length)} ครั้ง</span>
+            ${places.length ? `<span class="chip">📍 ${places.length === 1 ? esc(places[0])
+              : n0(places.length) + (kind === 'branch' ? ' ระบบ' : ' สาขา')}</span>` : ''}
+            <span class="chip">🗓 ${esc(span)}</span>
+            ${recs.length >= 2 && withH.length
+              ? `<span class="chip">⌀ ${n1(hours / withH.length)} ชม./ครั้ง</span>` : ''}
+            ${stopped < recs.length ? `<span class="chip">เครื่องหยุดจริง ${n0(stopped)} ครั้ง</span>` : ''}
+          </div>
+          ${peers.length > 1 ? `<div style="margin-top:12px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px">
+              <span style="font-size:11.5px;color:var(--muted)">ส่วนแบ่งของเวลาหยุดทั้งหมด</span>
+              <span class="chip${rank <= 3 ? ' crit' : ''}" style="flex:0 0 auto">อันดับ ${n0(rank)} จาก ${n0(peers.length)} ${unitWord}</span>
+            </div>
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) 48px;gap:9px;align-items:center">
+              <span class="track" style="height:10px"><i data-pct="${share}" style="background:var(--crit)"></i></span>
+              <b class="tab" style="font-size:13px;text-align:right">${n1(share)}%</b>
+            </div>
+          </div>` : ''}
+        </div>
+
+        ${monthSpark(recs)}
+
+        ${openHoursStrip(hours, rawHours)}
+
+        ${/* A bar chart of one bar is a decoration. With a single place, say it
+             in words; the ranking only starts meaning something at two. */''}
+        <div>
+          <p class="eyebrow" style="margin-bottom:8px">${kind === 'branch'
+            ? 'ระบบที่เสียที่สาขานี้' : 'เกิดที่สาขาไหนบ้าง'}${
+            byOther.length > 1 ? '<span style="color:var(--muted);font-weight:500"> — เรียงจากหยุดนานที่สุด</span>' : ''}</p>
+          ${!byOther.length ? '<p style="font-size:13px;color:var(--muted)">— ไม่มีข้อมูล —</p>'
+            : byOther.length === 1 ? `<p style="font-size:13px">
+                เกิดที่${kind === 'branch' ? 'ระบบ' : 'สาขา'}เดียวทั้งหมด —
+                <b>${esc(byOther[0].key)}</b> <span style="color:var(--muted)">(${n1(byOther[0].hours)} ชม.)</span></p>`
+            : byOther.slice(0, 8).map((r, i) => `
+            ${/* Same idiom as the ranked lists on the main pages: a rank, a bar
+                 measured against the worst one, and the hours in full. Packing
+                 the bar into a 96px cell beside the number left it 30px long —
+                 a bar that short compares nothing. */''}
+            <div style="display:grid;grid-template-columns:20px minmax(0,1fr) minmax(80px,1fr) 74px;
+              gap:9px;align-items:center;padding:5px 0">
+              <span class="tab" style="font-size:12px;font-weight:800;color:${i < 3 ? 'var(--crit-ink)' : 'var(--muted)'}">${i + 1}</span>
+              <span style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                title="${esc(r.key)}">${esc(r.key)}</span>
+              <span class="track" style="height:8px"><i data-pct="${r.hours / byOther[0].hours * 100}"
+                style="background:${i < 3 ? 'var(--s1)' : 'var(--line2)'}"></i></span>
+              <b class="tab" style="font-size:12.5px;white-space:nowrap;text-align:right">${n1(r.hours)} ชม.</b>
+            </div>`).join('')}
         </div>
 
         <div>
-          <p class="eyebrow" style="margin-bottom:8px">${kind === 'branch' ? 'ระบบที่มีปัญหาที่สาขานี้' : 'สาขาที่พบปัญหานี้'}</p>
-          ${byOther.slice(0, 8).map(r => `
-            <div style="display:grid;grid-template-columns:minmax(0,1fr) 82px;gap:10px;align-items:center;padding:5px 0">
-              <span style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.key)}</span>
-              <span style="display:flex;align-items:center;gap:7px">
-                <span class="track" style="height:8px;flex:1"><i data-pct="${r.share}" style="background:var(--s1)"></i></span>
-                <b class="tab" style="font-size:12.5px">${n0(r.hours)}h</b></span>
-            </div>`).join('') || '<p style="font-size:13px;color:var(--muted)">— ไม่มีข้อมูล —</p>'}
-        </div>
-
-        <div>
-          <p class="eyebrow" style="margin-bottom:8px">อาการที่แจ้งบ่อยที่สุด</p>
-          ${symptoms.map(r => `
-            <div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--line)">
-              <span style="font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.key)}</span>
-              <b class="tab" style="font-size:12.5px;flex:0 0 auto;color:var(--muted)">${n0(r.count)}× · ${n0(r.hours)}h</b>
-            </div>`).join('') || '<p style="font-size:13px;color:var(--muted)">— ไม่มีข้อมูล —</p>'}
+          <p class="eyebrow" style="margin-bottom:8px">คนแจ้งเขียนว่าอาการเป็นแบบไหน</p>
+          ${!symptoms.length ? '<p style="font-size:13px;color:var(--muted)">— ไม่มีข้อมูล —</p>'
+            : symptoms.map((r, i) => `
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(56px,0.55fr) auto;
+              gap:9px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)">
+              <span style="font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                title="${esc(r.key)}">${esc(r.key)}</span>
+              ${symptoms.length > 1
+                ? `<span class="track" style="height:7px"><i data-pct="${r.hours / symptoms[0].hours * 100}"
+                    style="background:${i ? 'var(--line2)' : 'var(--s2)'}"></i></span>` : '<span></span>'}
+              <b class="tab" style="font-size:12.5px;color:var(--muted);white-space:nowrap;text-align:right">${
+                recs.length > 1 ? n0(r.count) + ' ครั้ง · ' : ''}${n1(r.hours)} ชม.</b>
+            </div>`).join('')}
         </div>
 
         ${tech.has ? `<div>
-          <p class="eyebrow" style="margin-bottom:8px">🔧 ที่ช่างบันทึกไว้ — อาการ · สาเหตุ · วิธีแก้</p>
+          <p class="eyebrow" style="margin-bottom:4px">🔧 ช่างที่ไปซ่อมบันทึกอะไรไว้</p>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:8px">
+            ช่างเป็นคนกรอกเองในใบงาน ช่องไหนว่างแปลว่ายังไม่มีใครกรอก ไม่ใช่ไม่มีสาเหตุ</p>
           ${techNotesHTML(tech, 5, true)}
-        </div>` : ''}
+        </div>` : `<div>
+          <p class="eyebrow" style="margin-bottom:4px">🔧 ช่างที่ไปซ่อมบันทึกอะไรไว้</p>
+          <p style="font-size:12.5px;color:var(--muted)">
+            ยังไม่มีใครกรอกอาการ สาเหตุ หรือวิธีแก้ในใบงานชุดนี้ —
+            ถ้ากรอกจะวิเคราะห์ได้ว่าทำไมถึงเสียซ้ำ</p>
+        </div>`}
 
         ${rep.length ? `<div class="banner crit" style="padding:11px 13px">
           <span class="i">🔁</span>
@@ -9040,9 +9825,9 @@ function openDrill(kind, key){
         </div>` : ''}
 
         <div>
-          <p class="eyebrow" style="margin-bottom:8px">ใบงานล่าสุด <span style="color:var(--muted);font-weight:500">— กดที่แถวเพื่อดูรายละเอียดใบนั้น</span></p>
-          ${tableHTML([{h:'วันที่'},{h: kind === 'branch' ? 'ระบบ' : 'สาขา'},{h:'อาการ'},
-              ...(tech.has ? [{h:'สาเหตุ / วิธีแก้ (ช่าง)'}] : []), {h:'ชม.', num:1}],
+          <p class="eyebrow" style="margin-bottom:8px">ใบงานทีละใบ <span style="color:var(--muted);font-weight:500">— กดที่แถวเพื่อดูรายละเอียดใบนั้น</span></p>
+          ${tableHTML([{h:'วันที่'},{h: kind === 'branch' ? 'ระบบ' : 'สาขา'},{h:'คนแจ้งว่า'},
+              ...(tech.has ? [{h:'ช่างเจออะไร → แก้ยังไง'}] : []), {h:'หยุด (ชม.)', num:1}],
             recs.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 25).map(r => {
             const cells = [
               esc(fmtDate(r.date)),
@@ -9062,9 +9847,11 @@ function openDrill(kind, key){
         </div>
       </div>
       <div style="padding:13px 18px;border-top:1px solid var(--line);display:flex;gap:8px">
-        <button class="btn sm" data-filterto="${esc(kind)}|${esc(key)}" style="flex:1">กรองทั้งระบบด้วยตัวนี้</button>
-        <button class="btn sm primary" data-addaction="${esc(key)}" data-addkind="${esc(kind)}" style="flex:1">
-          START ACTION</button>
+        <button class="btn sm" data-filterto="${esc(kind)}|${esc(key)}" style="flex:1"
+          title="ให้ทุกหน้าในแดชบอร์ดแสดงเฉพาะเรื่องนี้">🔎 ดูทั้งแดชบอร์ดเฉพาะเรื่องนี้</button>
+        <button class="btn sm primary" data-addaction="${esc(key)}" data-addkind="${esc(kind)}" style="flex:1"
+          title="ตั้งเป็นงานแก้ปัญหา แล้ววัดผลว่าทำแล้ว downtime ลดจริงไหม">
+          ➕ ตั้งเป็นงานแก้ปัญหา</button>
       </div>
     </div>`;
   animate($('drill'));
@@ -9383,7 +10170,8 @@ function bindGlobalEvents(){
     if(t.id === 'aNew'){ openGate(); return; }
     if(t.id === 'gateClose' || t.id === 'gateBack'){ if(S.raw.length) closeGate(); return; }
     if(t.id === 'edHideEx'){ S.editHideExcluded = !S.editHideExcluded; render(); return; }
-    if(t.id === 'edFollow' || t.id === 'dsFollow'){ S.followFilter = !S.followFilter; render(); return; }
+    if(t.id === 'edFollow'){ S.edFollow = !S.edFollow; render(); return; }
+    if(t.id === 'dsFollow'){ S.dsFollow = !S.dsFollow; render(); return; }
     if(t.id === 'undoDel'){ undoRemove(); return; }
     if(t.id === 'undoExc'){
       const k = t.dataset.k;
@@ -9486,6 +10274,13 @@ function bindGlobalEvents(){
     }
     if(t.id === 'toastX'){ $('toast').hidden = true; return; }
     if(t.id === 'fStop'){ S.f.stoppedOnly = !S.f.stoppedOnly; render(); return; }
+    /* A page that has to explain "this filter is hiding something from you"
+       can now hand over the switch instead of telling the reader where to
+       find it. Only the two boolean filters are reachable this way. */
+    const fset = t.closest('[data-fset]');
+    if(fset && (fset.dataset.fset === 'stoppedOnly' || fset.dataset.fset === 'repeatOnly')){
+      S.f[fset.dataset.fset] = !S.f[fset.dataset.fset]; render(); return;
+    }
     if(t.id === 'fRep'){ S.f.repeatOnly = !S.f.repeatOnly; render(); return; }
     if(t.id === 'fClear'){
       S.f = {brand:'', series:'', branch:'', category:'', team:'', from:'', to:'',
@@ -9817,10 +10612,18 @@ function settleStatic(root){
     const v = Number(el.dataset.count);
     if(Number.isFinite(v)) el.textContent = Number(el.dataset.dp) ? n1(v) : n0(v);
   });
-  root.querySelectorAll('.track > i[data-pct]').forEach(el => {
+  root.querySelectorAll('.track > i[data-pct], .tgtbar > i[data-pct]').forEach(el => {
     el.style.transition = 'none';
     el.style.width = Math.max(0, Math.min(100, Number(el.dataset.pct) || 0)) + '%';
   });
+  /* The method behind each number lives in a <details class="why"> so the screen
+     can stay graphic. Paper has no one to click it open, so printing does it:
+     the PDF has to carry every rule the figures rest on, not a row of ‘›’
+     summaries.
+     Only `.why` — `.cases` holds the ticket lists behind each finding, and those
+     were always meant to be a screen affordance; opening them too added 16
+     sheets to the deck for evidence a reader can look up in the app. */
+  root.querySelectorAll('details.why').forEach(d => { d.open = true; });
 }
 
 function enterPrintMode(){
